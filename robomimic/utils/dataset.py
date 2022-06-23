@@ -32,6 +32,7 @@ class SequenceDataset(torch.utils.data.Dataset):
         hdf5_normalize_obs=False,
         filter_by_attribute=None,
         load_next_obs=True,
+        priority = False
     ):
         """
         Dataset class for fetching sequences of experience.
@@ -62,10 +63,10 @@ class SequenceDataset(torch.utils.data.Dataset):
 
             goal_mode (str): either "last" or None. Defaults to None, which is to not fetch goals
 
-            hdf5_cache_mode (str): one of ["all", "low_dim", or None]. Set to "all" to cache entire hdf5 
-                in memory - this is by far the fastest for data loading. Set to "low_dim" to cache all 
-                non-image data. Set to None to use no caching - in this case, every batch sample is 
-                retrieved via file i/o. You should almost never set this to None, even for large 
+            hdf5_cache_mode (str): one of ["all", "low_dim", or None]. Set to "all" to cache entire hdf5
+                in memory - this is by far the fastest for data loading. Set to "low_dim" to cache all
+                non-image data. Set to None to use no caching - in this case, every batch sample is
+                retrieved via file i/o. You should almost never set this to None, even for large
                 image datasets.
 
             hdf5_use_swmr (bool): whether to use swmr feature when opening the hdf5 file. This ensures
@@ -86,6 +87,8 @@ class SequenceDataset(torch.utils.data.Dataset):
         self.hdf5_use_swmr = hdf5_use_swmr
         self.hdf5_normalize_obs = hdf5_normalize_obs
         self._hdf5_file = None
+
+        self.priority = priority #if we priority sample from interventiosn only
 
         assert hdf5_cache_mode in ["all", "low_dim", None]
         self.hdf5_cache_mode = hdf5_cache_mode
@@ -153,14 +156,14 @@ class SequenceDataset(torch.utils.data.Dataset):
 
         self.close_and_delete_hdf5_handle()
 
-    def load_demo_info(self, filter_by_attribute=None, demos=None):
+    def load_demo_info(self, filter_by_attribute=None, demos=None, update = False):
         """
         Args:
             filter_by_attribute (str): if provided, use the provided filter key
                 to select a subset of demonstration trajectories to load
 
-            demos (list): list of demonstration keys to load from the hdf5 file. If 
-                omitted, all demos in the file (or under the @filter_by_attribute 
+            demos (list): list of demonstration keys to load from the hdf5 file. If
+                omitted, all demos in the file (or under the @filter_by_attribute
                 filter key) are used.
         """
         # filter demo trajectory by mask
@@ -169,7 +172,7 @@ class SequenceDataset(torch.utils.data.Dataset):
         elif filter_by_attribute is not None:
             self.demos = [elem.decode("utf-8") for elem in np.array(self.hdf5_file["mask/{}".format(filter_by_attribute)][:])]
         else:
-            self.demos = list(self.hdf5_file["data"].keys())
+            self.demos = list(self.hdf5_file["data"].keys()) #demo_0, demo_1, ...
 
         # sort demo keys
         inds = np.argsort([int(elem[5:]) for elem in self.demos])
@@ -177,16 +180,21 @@ class SequenceDataset(torch.utils.data.Dataset):
 
         self.n_demos = len(self.demos)
 
-        # keep internal index maps to know which transitions belong to which demos
-        self._index_to_demo_id = dict()  # maps every index to a demo id
-        self._demo_id_to_start_indices = dict()  # gives start index per demo id
-        self._demo_id_to_demo_length = dict()
+        if not update: #if we are updating, we should not be clearing
+            assert self._index_to_demo_id is not None, "you're updating an uninitialized metadata structure!"
+            # keep internal index maps to know which transitions belong to which demos
+            self._index_to_demo_id = dict()  # maps every index to a demo id
+            self._demo_id_to_start_indices = dict()  # gives start index per demo id
+            self._demo_id_to_demo_length = dict()
+            # determine index mapping
+            self.total_num_sequences = 0
 
-        # determine index mapping
-        self.total_num_sequences = 0
         for ep in self.demos:
-            demo_length = self.hdf5_file["data/{}".format(ep)].attrs["num_samples"]
-            self._demo_id_to_start_indices[ep] = self.total_num_sequences
+            if self.priority:
+                demo_length = self.hdf5_file["data/{}".format(ep)].attrs["num_interventions"]
+            else:
+                demo_length = self.hdf5_file["data/{}".format(ep)].attrs["num_samples"]
+            self._demo_id_to_start_indices[ep] = self.total_num_sequences #keeping track of where things start
             self._demo_id_to_demo_length[ep] = demo_length
 
             num_sequences = demo_length
@@ -256,7 +264,7 @@ class SequenceDataset(torch.utils.data.Dataset):
 
     def __len__(self):
         """
-        Ensure that the torch dataloader will do a complete pass through all sequences in 
+        Ensure that the torch dataloader will do a complete pass through all sequences in
         the dataset before starting a new iteration.
         """
         return self.total_num_sequences
@@ -283,6 +291,8 @@ class SequenceDataset(torch.utils.data.Dataset):
             all_data[ep] = {}
             all_data[ep]["attrs"] = {}
             all_data[ep]["attrs"]["num_samples"] = hdf5_file["data/{}".format(ep)].attrs["num_samples"]
+            if self.priority:
+                all_data[ep]["attrs"]["interventions"] = hdf5_file["data/{}".format(ep)].attrs["interventions"]
             # get obs
             all_data[ep]["obs"] = {k: hdf5_file["data/{}/obs/{}".format(ep, k)][()].astype('float32') for k in obs_keys}
             if load_next_obs:
@@ -299,9 +309,48 @@ class SequenceDataset(torch.utils.data.Dataset):
 
         return all_data
 
+    def update_dataset_in_memory(self, demo_list, hdf5_file, obs_keys, dataset_keys, load_next_obs):
+        """
+        Loads the hdf5 dataset into memory, preserving the structure of the file. Note that this
+        differs from `self.getitem_cache`, which, if active, actually caches the outputs of the
+        `getitem` operation.
+
+        Args:
+            demo_list (list): list of demo keys, e.g., 'demo_0'
+            hdf5_file (h5py.File): file handle to the hdf5 dataset.
+            obs_keys (list, tuple): observation keys to fetch, e.g., 'images'
+            dataset_keys (list, tuple): dataset keys to fetch, e.g., 'actions'
+            load_next_obs (bool): whether to load next_obs from the dataset
+
+        Returns:
+            all_data (dict): dictionary of loaded data.
+        """
+        assert self.hdf5_cache is not None, "You have not initialized the dataset!"
+        self.load_demo_info(filter_by_attribute=self.filter_by_attribute, demos=demo_list, update = True) # updating the metadata
+        print("SequenceDataset: updating dataset into memory...")
+        for ep in LogUtils.custom_tqdm(demo_list):
+            self.hdf5_cache[ep] = {}
+            self.hdf5_cache[ep]["attrs"] = {}
+            self.hdf5_cache[ep]["attrs"]["num_samples"] = hdf5_file["data/{}".format(ep)].attrs["num_samples"]
+            if self.priority:
+                self.hdf5_cache[ep]["attrs"]["interventions"] = hdf5_file["data/{}".format(ep)].attrs["interventions"]
+            # get obs
+            self.hdf5_cache[ep]["obs"] = {k: hdf5_file["data/{}/obs/{}".format(ep, k)][()].astype('float32') for k in obs_keys}
+            if load_next_obs:
+                self.hdf5_cache[ep]["next_obs"] = {k: hdf5_file["data/{}/next_obs/{}".format(ep, k)][()].astype('float32') for k in obs_keys}
+            # get other dataset keys
+            for k in dataset_keys:
+                if k in hdf5_file["data/{}".format(ep)]:
+                    self.hdf5_cache[ep][k] = hdf5_file["data/{}/{}".format(ep, k)][()].astype('float32')
+                else:
+                    self.hdf5_cache[ep][k] = np.zeros((self.hdf5_cache[ep]["attrs"]["num_samples"], 1), dtype=np.float32)
+
+            if "model_file" in hdf5_file["data/{}".format(ep)].attrs:
+                self.hdf5_cache[ep]["attrs"]["model_file"] = hdf5_file["data/{}".format(ep)].attrs["model_file"]
+
     def normalize_obs(self):
         """
-        Computes a dataset-wide mean and standard deviation for the observations 
+        Computes a dataset-wide mean and standard deviation for the observations
         (per dimension and per obs key) and returns it.
         """
         def _compute_traj_stats(traj_obs_dict):
@@ -408,7 +457,6 @@ class SequenceDataset(torch.utils.data.Dataset):
         """
         Main implementation of getitem when not using cache.
         """
-
         demo_id = self._index_to_demo_id[index]
         demo_start_index = self._demo_id_to_start_indices[demo_id]
         demo_length = self._demo_id_to_demo_length[demo_id]
@@ -416,6 +464,9 @@ class SequenceDataset(torch.utils.data.Dataset):
         # start at offset index if not padding for frame stacking
         demo_index_offset = 0 if self.pad_frame_stack else (self.n_frame_stack - 1)
         index_in_demo = index - demo_start_index + demo_index_offset
+        if self.priority:
+            # we map the index to the actual indices that it corresponds to
+            index_in_demo = self.hdf5_cache[demo_id]["attrs"]["interventions"][index_in_demo]
 
         # end at offset index if not padding for seq length
         demo_length_offset = 0 if self.pad_seq_length else (self.seq_length - 1)
@@ -549,7 +600,7 @@ class SequenceDataset(torch.utils.data.Dataset):
     def get_dataset_sequence_from_demo(self, demo_id, index_in_demo, keys, seq_length=1):
         """
         Extract a (sub)sequence of dataset items from a demo given the @keys of the items (e.g., states, actions).
-        
+
         Args:
             demo_id (str): id of the demo, e.g., demo_0
             index_in_demo (int): beginning index of the sequence wrt the demo
