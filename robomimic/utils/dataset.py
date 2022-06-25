@@ -181,21 +181,26 @@ class SequenceDataset(torch.utils.data.Dataset):
         self.n_demos = len(self.demos)
 
         if not update: #if we are updating, we should not be clearing
-            assert self._index_to_demo_id is not None, "you're updating an uninitialized metadata structure!"
             # keep internal index maps to know which transitions belong to which demos
             self._index_to_demo_id = dict()  # maps every index to a demo id
             self._demo_id_to_start_indices = dict()  # gives start index per demo id
             self._demo_id_to_demo_length = dict()
+            self._demo_id_to_true_length = dict()
             # determine index mapping
             self.total_num_sequences = 0
+        else:
+            # just check one
+            assert self._index_to_demo_id is not None, "you're updating an uninitialized metadata structure!"
 
         for ep in self.demos:
             if self.priority:
                 demo_length = self.hdf5_file["data/{}".format(ep)].attrs["num_interventions"]
+                self._demo_id_to_true_length[ep] = self.hdf5_file["data/{}".format(ep)].attrs["num_samples"]
             else:
                 demo_length = self.hdf5_file["data/{}".format(ep)].attrs["num_samples"]
             self._demo_id_to_start_indices[ep] = self.total_num_sequences #keeping track of where things start
             self._demo_id_to_demo_length[ep] = demo_length
+
 
             num_sequences = demo_length
             # determine actual number of sequences taking into account whether to pad for frame_stack and seq_length
@@ -291,8 +296,9 @@ class SequenceDataset(torch.utils.data.Dataset):
             all_data[ep] = {}
             all_data[ep]["attrs"] = {}
             all_data[ep]["attrs"]["num_samples"] = hdf5_file["data/{}".format(ep)].attrs["num_samples"]
-            if self.priority:
-                all_data[ep]["attrs"]["interventions"] = hdf5_file["data/{}".format(ep)].attrs["interventions"]
+            # if self.priority:
+            #     "corrections"
+            #     all_data[ep]["attrs"]["interventions"] = hdf5_file["data/{}".format(ep)].attrs["interventions"]
             # get obs
             all_data[ep]["obs"] = {k: hdf5_file["data/{}/obs/{}".format(ep, k)][()].astype('float32') for k in obs_keys}
             if load_next_obs:
@@ -309,7 +315,22 @@ class SequenceDataset(torch.utils.data.Dataset):
 
         return all_data
 
-    def update_dataset_in_memory(self, demo_list, hdf5_file, obs_keys, dataset_keys, load_next_obs):
+    def update_dataset_in_memory(self, demo_list, hdf5_file):
+        """
+        Client side funciton that allows you to update the internal database with new demos.
+        :param demo_list: List of names of demos (demo_0, demo_1, ...)
+        :param hdf5_file: file handle (not file path) of the hdf5 database
+        :return: nothing
+        """
+        self.update_dataset_in_memory_internal(
+            demo_list=demo_list,
+            hdf5_file=hdf5_file,
+            obs_keys=self.obs_keys_in_memory,
+            dataset_keys=self.dataset_keys,
+            load_next_obs=self.load_next_obs
+        )
+
+    def update_dataset_in_memory_internal(self, demo_list, hdf5_file, obs_keys, dataset_keys, load_next_obs):
         """
         Loads the hdf5 dataset into memory, preserving the structure of the file. Note that this
         differs from `self.getitem_cache`, which, if active, actually caches the outputs of the
@@ -332,8 +353,9 @@ class SequenceDataset(torch.utils.data.Dataset):
             self.hdf5_cache[ep] = {}
             self.hdf5_cache[ep]["attrs"] = {}
             self.hdf5_cache[ep]["attrs"]["num_samples"] = hdf5_file["data/{}".format(ep)].attrs["num_samples"]
-            if self.priority:
-                self.hdf5_cache[ep]["attrs"]["interventions"] = hdf5_file["data/{}".format(ep)].attrs["interventions"]
+
+            # if self.priority:
+            #     self.hdf5_cache[ep]["attrs"]["interventions"] = hdf5_file["data/{}".format(ep)].attrs["interventions"]
             # get obs
             self.hdf5_cache[ep]["obs"] = {k: hdf5_file["data/{}/obs/{}".format(ep, k)][()].astype('float32') for k in obs_keys}
             if load_next_obs:
@@ -459,23 +481,32 @@ class SequenceDataset(torch.utils.data.Dataset):
         """
         demo_id = self._index_to_demo_id[index]
         demo_start_index = self._demo_id_to_start_indices[demo_id]
-        demo_length = self._demo_id_to_demo_length[demo_id]
+        # if self.priority:
+        #     viable_sample_size = self._demo_id_to_intervention_number[demo_id]
+        # else:
+        viable_sample_size = self._demo_id_to_demo_length[demo_id]
 
         # start at offset index if not padding for frame stacking
         demo_index_offset = 0 if self.pad_frame_stack else (self.n_frame_stack - 1)
         index_in_demo = index - demo_start_index + demo_index_offset
         if self.priority:
             # we map the index to the actual indices that it corresponds to
-            index_in_demo = self.hdf5_cache[demo_id]["attrs"]["interventions"][index_in_demo]
+            index_in_demo = int(self.hdf5_cache[demo_id]["corrections"][index_in_demo])
 
         # end at offset index if not padding for seq length
         demo_length_offset = 0 if self.pad_seq_length else (self.seq_length - 1)
-        end_index_in_demo = demo_length - demo_length_offset
+        end_index_in_demo = viable_sample_size - demo_length_offset
+
+        keys = list(self.dataset_keys)
+
+        # if we are sampling corrections only, we don't want to sample the corrections list too
+        if self.priority:
+            keys.remove("corrections")
 
         meta = self.get_dataset_sequence_from_demo(
             demo_id,
             index_in_demo=index_in_demo,
-            keys=self.dataset_keys,
+            keys=tuple(keys),
             seq_length=self.seq_length
         )
 
@@ -539,7 +570,10 @@ class SequenceDataset(torch.utils.data.Dataset):
         assert num_frames_to_stack >= 0
         assert seq_length >= 1
 
-        demo_length = self._demo_id_to_demo_length[demo_id]
+        if self.priority:
+            demo_length = self._demo_id_to_true_length[demo_id]
+        else:
+            demo_length = self._demo_id_to_demo_length[demo_id]
         assert index_in_demo < demo_length
 
         # determine begin and end of sequence

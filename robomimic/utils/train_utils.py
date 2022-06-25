@@ -112,7 +112,7 @@ def load_data_for_training(config, obs_keys):
     return train_dataset, valid_dataset
 
 
-def dataset_factory(config, obs_keys, filter_by_attribute=None, dataset_path=None):
+def dataset_factory(config, obs_keys, filter_by_attribute=None, dataset_path=None, priority = False):
     """
     Create a SequenceDataset instance to pass to a torch DataLoader.
 
@@ -134,6 +134,12 @@ def dataset_factory(config, obs_keys, filter_by_attribute=None, dataset_path=Non
     if dataset_path is None:
         dataset_path = config.train.data
 
+    if priority:
+        # require that we read this when we update the dataset 
+        with config.values_unlocked():
+            if "corrections" not in config.train.dataset_keys:
+                config.train.dataset_keys.append("corrections")
+
     ds_kwargs = dict(
         hdf5_path=dataset_path,
         obs_keys=obs_keys,
@@ -148,7 +154,8 @@ def dataset_factory(config, obs_keys, filter_by_attribute=None, dataset_path=Non
         hdf5_cache_mode=config.train.hdf5_cache_mode,
         hdf5_use_swmr=config.train.hdf5_use_swmr,
         hdf5_normalize_obs=config.train.hdf5_normalize_obs,
-        filter_by_attribute=filter_by_attribute
+        filter_by_attribute=filter_by_attribute,
+        priority = priority
     )
     dataset = SequenceDataset(**ds_kwargs)
 

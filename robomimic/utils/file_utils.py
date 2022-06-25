@@ -367,6 +367,7 @@ def policy_from_checkpoint(device=None, ckpt_path=None, ckpt_dict=None, verbose=
     )
     model.deserialize(ckpt_dict["model"])
     model.set_eval()
+    # we will only use a rollout policy if we don't intend on updating it
     model = RolloutPolicy(model, obs_normalization_stats=obs_normalization_stats)
     if verbose:
         print("============= Loaded Policy =============")
