@@ -35,7 +35,7 @@ class DataLogger(object):
     """
     Logging class to log metrics to tensorboard and/or retrieve running statistics about logged data.
     """
-    def __init__(self, log_dir, log_tb=True):
+    def __init__(self, log_dir, log_tb=True, log_csv = False):
         """
         Args:
             log_dir (str): base path to store logs

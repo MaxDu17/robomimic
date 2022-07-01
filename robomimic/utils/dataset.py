@@ -296,10 +296,6 @@ class SequenceDataset(torch.utils.data.Dataset):
             all_data[ep] = {}
             all_data[ep]["attrs"] = {}
             all_data[ep]["attrs"]["num_samples"] = hdf5_file["data/{}".format(ep)].attrs["num_samples"]
-            # if self.priority:
-            #     "corrections"
-            #     all_data[ep]["attrs"]["interventions"] = hdf5_file["data/{}".format(ep)].attrs["interventions"]
-            # get obs
             all_data[ep]["obs"] = {k: hdf5_file["data/{}/obs/{}".format(ep, k)][()].astype('float32') for k in obs_keys}
             if load_next_obs:
                 all_data[ep]["next_obs"] = {k: hdf5_file["data/{}/next_obs/{}".format(ep, k)][()].astype('float32') for k in obs_keys}
@@ -312,7 +308,7 @@ class SequenceDataset(torch.utils.data.Dataset):
 
             if "model_file" in hdf5_file["data/{}".format(ep)].attrs:
                 all_data[ep]["attrs"]["model_file"] = hdf5_file["data/{}".format(ep)].attrs["model_file"]
-
+        print(f"Now there are now {len(all_data.keys())} demos in the buffer.")
         return all_data
 
     def update_dataset_in_memory(self, demo_list, hdf5_file):
@@ -346,8 +342,26 @@ class SequenceDataset(torch.utils.data.Dataset):
         Returns:
             all_data (dict): dictionary of loaded data.
         """
-        assert self.hdf5_cache is not None, "You have not initialized the dataset!"
+        old_length = len(self) #for cache update information
         self.load_demo_info(filter_by_attribute=self.filter_by_attribute, demos=demo_list, update = True) # updating the metadata
+        if self.hdf5_cache is None and self.hdf5_cache_mode == "all":
+            print("SequenceDataset: updating dataset into memory (with cache)...")
+            # here, we hot-load the relevant demonstrations only, as we discard the cache later
+            self.hdf5_cache = self.load_dataset_in_memory(
+                demo_list=self.demos,
+                hdf5_file=self.hdf5_file,
+                obs_keys=self.obs_keys_in_memory,
+                dataset_keys=self.dataset_keys,
+                load_next_obs=self.load_next_obs
+            )
+            print("SequenceDataset: updating get_item calls...")
+            self.getitem_cache.extend([self.get_item(i) for i in LogUtils.custom_tqdm(range(old_length, len(self)))])
+            # don't need the previous cache anymore
+            del self.hdf5_cache
+            self.hdf5_cache = None
+            return
+        elif self.hdf5_cache is None and self.hdf5_cache_mode != "all":
+            raise Exception("you have not initialized the dataset!")
         print("SequenceDataset: updating dataset into memory...")
         for ep in LogUtils.custom_tqdm(demo_list):
             self.hdf5_cache[ep] = {}
@@ -369,6 +383,7 @@ class SequenceDataset(torch.utils.data.Dataset):
 
             if "model_file" in hdf5_file["data/{}".format(ep)].attrs:
                 self.hdf5_cache[ep]["attrs"]["model_file"] = hdf5_file["data/{}".format(ep)].attrs["model_file"]
+        print(f"Now there are {len(self.hdf5_cache.keys())} demos in the buffer.")
 
     def normalize_obs(self):
         """
@@ -500,8 +515,8 @@ class SequenceDataset(torch.utils.data.Dataset):
         keys = list(self.dataset_keys)
 
         # if we are sampling corrections only, we don't want to sample the corrections list too
-        if self.priority:
-            keys.remove("corrections")
+        if "corrections" in keys: 
+            keys.remove("corrections") #remove corrections if not needed
 
         meta = self.get_dataset_sequence_from_demo(
             demo_id,
@@ -523,6 +538,7 @@ class SequenceDataset(torch.utils.data.Dataset):
             seq_length=self.seq_length,
             prefix="obs"
         )
+
         if self.hdf5_normalize_obs:
             meta["obs"] = ObsUtils.normalize_obs(meta["obs"], obs_normalization_stats=self.obs_normalization_stats)
 

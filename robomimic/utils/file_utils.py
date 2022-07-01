@@ -311,7 +311,7 @@ def config_from_checkpoint(algo_name=None, ckpt_path=None, ckpt_dict=None, verbo
     return config, ckpt_dict
 
 
-def policy_from_checkpoint(device=None, ckpt_path=None, ckpt_dict=None, verbose=False):
+def policy_from_checkpoint(device=None, ckpt_path=None, ckpt_dict=None, verbose=False, trainable = False):
     """
     This function restores a trained policy from a checkpoint file or
     loaded model dictionary.
@@ -366,6 +366,9 @@ def policy_from_checkpoint(device=None, ckpt_path=None, ckpt_dict=None, verbose=
         device=device,
     )
     model.deserialize(ckpt_dict["model"])
+    if trainable:
+        return model, ckpt_dict
+    
     model.set_eval()
     # we will only use a rollout policy if we don't intend on updating it
     model = RolloutPolicy(model, obs_normalization_stats=obs_normalization_stats)

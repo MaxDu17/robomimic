@@ -1,5 +1,5 @@
 """
-This file contains several utility functions used to define the main training loop. It 
+This file contains several utility functions used to define the main training loop. It
 mainly consists of functions to assist with logging, rollouts, and the @run_epoch function,
 which is the core training logic for models in this repository.
 """
@@ -28,14 +28,14 @@ from robomimic.algo import RolloutPolicy
 def get_exp_dir(config, auto_remove_exp_dir=False):
     """
     Create experiment directory from config. If an identical experiment directory
-    exists and @auto_remove_exp_dir is False (default), the function will prompt 
+    exists and @auto_remove_exp_dir is False (default), the function will prompt
     the user on whether to remove and replace it, or keep the existing one and
     add a new subdirectory with the new timestamp for the current run.
 
     Args:
         auto_remove_exp_dir (bool): if True, automatically remove the existing experiment
             folder if it exists at the same path.
-    
+
     Returns:
         log_dir (str): path to created log directory (sub-folder in experiment directory)
         output_dir (str): path to created models directory (sub-folder in experiment directory)
@@ -135,7 +135,7 @@ def dataset_factory(config, obs_keys, filter_by_attribute=None, dataset_path=Non
         dataset_path = config.train.data
 
     if priority:
-        # require that we read this when we update the dataset 
+        # require that we read this when we update the dataset
         with config.values_unlocked():
             if "corrections" not in config.train.dataset_keys:
                 config.train.dataset_keys.append("corrections")
@@ -163,8 +163,8 @@ def dataset_factory(config, obs_keys, filter_by_attribute=None, dataset_path=Non
 
 
 def run_rollout(
-        policy, 
-        env, 
+        policy,
+        env,
         horizon,
         use_goals=False,
         render=False,
@@ -186,7 +186,7 @@ def run_rollout(
 
         render (bool): if True, render the rollout to the screen
 
-        video_writer (imageio Writer instance): if not None, use video writer object to append frames at 
+        video_writer (imageio Writer instance): if not None, use video writer object to append frames at
             rate given by @video_skip
 
         video_skip (int): how often to write video frame
@@ -306,10 +306,10 @@ def rollout_with_stats(
         terminate_on_success (bool): if True, terminate episode early as soon as a success is encountered
 
         verbose (bool): if True, print results of each rollout
-    
+
     Returns:
-        all_rollout_logs (dict): dictionary of rollout statistics (e.g. return, success rate, ...) 
-            averaged across all rollouts 
+        all_rollout_logs (dict): dictionary of rollout statistics (e.g. return, success rate, ...)
+            averaged across all rollouts
 
         video_paths (dict): path to rollout videos for each environment
     """
@@ -329,7 +329,7 @@ def rollout_with_stats(
         video_writers = { k : video_writer for k in envs }
     if video_dir is not None:
         # video is written per env
-        video_str = "_epoch_{}.mp4".format(epoch) if epoch is not None else ".mp4" 
+        video_str = "_epoch_{}.mp4".format(epoch) if epoch is not None else ".mp4"
         video_paths = { k : os.path.join(video_dir, "{}{}".format(k, video_str)) for k in envs }
         video_writers = { k : imageio.get_writer(video_paths[k], fps=20) for k in envs }
 
@@ -411,10 +411,10 @@ def should_save_from_rollout_logs(
         epoch_ckpt_name (str): what to name the checkpoint file - this name might be modified
             by this function
 
-        save_on_best_rollout_return (bool): if True, should save checkpoints that achieve a 
+        save_on_best_rollout_return (bool): if True, should save checkpoints that achieve a
             new best rollout return
 
-        save_on_best_rollout_success_rate (bool): if True, should save checkpoints that achieve a 
+        save_on_best_rollout_success_rate (bool): if True, should save checkpoints that achieve a
             new best rollout success rate
 
     Returns:
@@ -490,8 +490,23 @@ def save_model(model, config, env_meta, shape_meta, ckpt_path, obs_normalization
     torch.save(params, ckpt_path)
     print("save checkpoint to {}".format(ckpt_path))
 
+def weld_batches(first_batch, second_batch):
+    # assert first_batch.keys() == second_batch.keys(), "the batches have different keys!"
+    combined = {}
+    for key in first_batch.keys():
+        val1 = first_batch[key]
+        val2 = second_batch[key]
+        if type(val1) is torch.Tensor:
+            combined[key] = torch.cat((val1, val2), dim = 0)
+        else:# for obs
+            combined[key] = {}
+            for inner_key in val1.keys():
+                inner_val1 = val1[inner_key]
+                inner_val2 = val2[inner_key]
+                combined[key][inner_key] = torch.cat((inner_val1, inner_val2), dim = 0)
+    return combined
 
-def run_epoch(model, data_loader, epoch, validate=False, num_steps=None):
+def run_epoch(model, data_loader,epoch, validate=False, num_steps=None, second_data_loader = None):
     """
     Run an epoch of training or validation.
 
@@ -509,6 +524,8 @@ def run_epoch(model, data_loader, epoch, validate=False, num_steps=None):
         num_steps (int): if provided, this epoch lasts for a fixed number of batches (gradient steps),
             otherwise the epoch is a complete pass through the training dataset
 
+        second_data_loader (DataLoader instance): second replay buffer to sample from (see data_loader)
+
     Returns:
         step_log_all (dict): dictionary of logged training metrics averaged across all batches
     """
@@ -525,15 +542,24 @@ def run_epoch(model, data_loader, epoch, validate=False, num_steps=None):
     start_time = time.time()
 
     data_loader_iter = iter(data_loader)
+    if second_data_loader is not None:
+        second_data_loader_iter = iter(second_data_loader)
+
     for _ in LogUtils.custom_tqdm(range(num_steps)):
 
         # load next batch from data loader
         try:
             t = time.time()
             batch = next(data_loader_iter)
+            if second_data_loader is not None:
+                second_batch = next(second_data_loader_iter)
+                batch = weld_batches(batch, second_batch)
+
         except StopIteration:
             # reset for next dataset pass
             data_loader_iter = iter(data_loader)
+            if second_data_loader is not None:
+                second_data_loader_iter = iter(second_data_loader)
             t = time.time()
             batch = next(data_loader_iter)
         timing_stats["Data_Loading"].append(time.time() - t)
@@ -574,9 +600,9 @@ def run_epoch(model, data_loader, epoch, validate=False, num_steps=None):
 
 def is_every_n_steps(interval, current_step, skip_zero=False):
     """
-    Convenient function to check whether current_step is at the interval. 
+    Convenient function to check whether current_step is at the interval.
     Returns True if current_step % interval == 0 and asserts a few corner cases (e.g., interval <= 0)
-    
+
     Args:
         interval (int): target interval
         current_step (int): current step
