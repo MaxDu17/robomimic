@@ -32,7 +32,8 @@ class SequenceDataset(torch.utils.data.Dataset):
         hdf5_normalize_obs=False,
         filter_by_attribute=None,
         load_next_obs=True,
-        priority = False
+        priority = False,
+        weighting = False
     ):
         """
         Dataset class for fetching sequences of experience.
@@ -89,6 +90,7 @@ class SequenceDataset(torch.utils.data.Dataset):
         self._hdf5_file = None
 
         self.priority = priority #if we priority sample from interventiosn only
+        self.weighting = weighting
 
         assert hdf5_cache_mode in ["all", "low_dim", None]
         self.hdf5_cache_mode = hdf5_cache_mode
@@ -183,6 +185,7 @@ class SequenceDataset(torch.utils.data.Dataset):
         if not update: #if we are updating, we should not be clearing
             # keep internal index maps to know which transitions belong to which demos
             self._index_to_demo_id = dict()  # maps every index to a demo id
+            self._weight_list = dict()
             self._demo_id_to_start_indices = dict()  # gives start index per demo id
             self._demo_id_to_demo_length = dict()
             self._demo_id_to_true_length = dict()
@@ -217,6 +220,7 @@ class SequenceDataset(torch.utils.data.Dataset):
 
             for _ in range(num_sequences):
                 self._index_to_demo_id[self.total_num_sequences] = ep
+                self._weight_list[self.total_num_sequences] = 1
                 self.total_num_sequences += 1
 
     @property
@@ -299,6 +303,9 @@ class SequenceDataset(torch.utils.data.Dataset):
             all_data[ep]["obs"] = {k: hdf5_file["data/{}/obs/{}".format(ep, k)][()].astype('float32') for k in obs_keys}
             if load_next_obs:
                 all_data[ep]["next_obs"] = {k: hdf5_file["data/{}/next_obs/{}".format(ep, k)][()].astype('float32') for k in obs_keys}
+            # establishing equal weights at first
+            # if self.weighting:
+            #     all_data[ep]["weights"] = np.ones((all_data[ep]["attrs"]["num_samples"], 1), dtype=np.float32)
             # get other dataset keys
             for k in dataset_keys:
                 if k in hdf5_file["data/{}".format(ep)]:
@@ -367,7 +374,9 @@ class SequenceDataset(torch.utils.data.Dataset):
             self.hdf5_cache[ep] = {}
             self.hdf5_cache[ep]["attrs"] = {}
             self.hdf5_cache[ep]["attrs"]["num_samples"] = hdf5_file["data/{}".format(ep)].attrs["num_samples"]
-
+            # baseline weights
+            # if self.weighting:
+            #     all_data[ep]["weights"] = np.ones((all_data[ep]["attrs"]["num_samples"], 1), dtype=np.float32)
             # if self.priority:
             #     self.hdf5_cache[ep]["attrs"]["interventions"] = hdf5_file["data/{}".format(ep)].attrs["interventions"]
             # get obs
@@ -384,6 +393,28 @@ class SequenceDataset(torch.utils.data.Dataset):
             if "model_file" in hdf5_file["data/{}".format(ep)].attrs:
                 self.hdf5_cache[ep]["attrs"]["model_file"] = hdf5_file["data/{}".format(ep)].attrs["model_file"]
         print(f"Now there are {len(self.hdf5_cache.keys())} demos in the buffer.")
+
+    def reweigh_data(self, intervention_set, classifier):
+        assert self.weighting, "You must enable weighting to weigh the dataset!"
+        assert self.hdf5_cache is not None, "Cachine is not yet implemented for weighted sampling"
+        assert not self.priority, "Priority sampling is not yet implemented for weighted sampling"
+        num_samples = intervention_set.shape[0] # number of samples we are comparing
+
+        for index in LogUtils.custom_tqdm(self.total_num_sequences):
+            demo_id = self._index_to_demo_id[index]
+            demo_start_index = self._demo_id_to_start_indices[demo_id]
+            # start at offset index if not padding for frame stacking
+            demo_index_offset = 0 if self.pad_frame_stack else (self.n_frame_stack - 1) #only works for one frame stack
+            index_in_demo = index - demo_start_index + demo_index_offset
+            #now, we just index and reweigh
+            transition = {key: value[index_in_demo] for key, value in self.hdf5_cache[demo_id]["obs"].items()}
+            import pdb
+            pdb.set_trace()
+            # just to verify that we are indeed slicing properly
+            transition = {key: np.tile(value, num_samples, axis = 0) for key, value in transition.items()} # make a pseudobatch
+            all_scores = classifier(intervention_set, transition)
+            self._weight_list[index] = all_scores
+
 
     def normalize_obs(self):
         """
@@ -515,7 +546,7 @@ class SequenceDataset(torch.utils.data.Dataset):
         keys = list(self.dataset_keys)
 
         # if we are sampling corrections only, we don't want to sample the corrections list too
-        if "corrections" in keys: 
+        if "corrections" in keys:
             keys.remove("corrections") #remove corrections if not needed
 
         meta = self.get_dataset_sequence_from_demo(
@@ -711,4 +742,8 @@ class SequenceDataset(torch.utils.data.Dataset):
         See the `train` function in scripts/train.py, and torch
         `DataLoader` documentation, for more info.
         """
+        if self.weighting:
+            return WeightedRandomSampler(self._weight_list, self.total_num_sequences)  # if we are weighting
         return None
+
+
