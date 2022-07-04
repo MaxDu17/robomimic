@@ -1,0 +1,118 @@
+import numpy as np
+from collections import OrderedDict
+
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import torch.distributions as D
+
+import robomimic.utils.tensor_utils as TensorUtils
+from robomimic.models.obs_nets import MIMO_MLP
+from robomimic.models.distributions import DiscreteValueDistribution
+
+
+class WeighterNet(MIMO_MLP):
+    """
+    A basic value network that predicts values from observations.
+    Can optionally be goal conditioned on future observations.
+    """
+    def __init__(
+        self,
+        obs_shapes,
+        mlp_layer_dims,
+        weight_bounds=None,
+        encoder_kwargs=None,
+    ):
+        """
+        Args:
+            obs_shapes (OrderedDict): a dictionary that maps observation keys to
+                expected shapes for observations.
+
+            mlp_layer_dims ([int]): sequence of integers for the MLP hidden layers sizes.
+
+            weight_bounds (tuple): a 2-tuple corresponding to the lowest and highest possible return
+                that the network should be possible of generating. The network will rescale outputs
+                using a tanh layer to lie within these bounds. If None, no tanh re-scaling is done.
+
+            goal_shapes (OrderedDict): a dictionary that maps observation keys to
+                expected shapes for goal observations.
+
+            encoder_kwargs (dict or None): If None, results in default encoder_kwargs being applied. Otherwise, should
+                be nested dictionary containing relevant per-observation key information for encoder networks.
+                Should be of form:
+
+                obs_modality1: dict
+                    feature_dimension: int
+                    core_class: str
+                    core_kwargs: dict
+                        ...
+                        ...
+                    obs_randomizer_class: str
+                    obs_randomizer_kwargs: dict
+                        ...
+                        ...
+                obs_modality2: dict
+                    ...
+        """
+        self.weight_bounds = weight_bounds
+        if self.weight_bounds is not None:
+            # convert [lb, ub] to a scale and offset for the tanh output, which is in [-1, 1]
+            self._weight_scale = (float(self.weight_bounds[1]) - float(self.weight_bounds[0])) / 2.
+            self._weight_offset = (float(self.weight_bounds[1]) + float(self.weight_bounds[0])) / 2.
+
+        assert isinstance(obs_shapes, OrderedDict)
+        self.obs_shapes = obs_shapes
+        for key in self.obs_shapes:
+            self.obs_shapes[key][0] *= 2 # early fusion here
+
+        # set up different observation groups for @MIMO_MLP
+        observation_group_shapes = OrderedDict()
+        observation_group_shapes["obs"] = OrderedDict(self.obs_shapes)
+
+        output_shapes = self._get_output_shapes()
+        super(WeighterNet, self).__init__(
+            input_obs_group_shapes=observation_group_shapes,
+            output_shapes=output_shapes,
+            layer_dims=mlp_layer_dims,
+            encoder_kwargs=encoder_kwargs,
+        )
+
+    def _get_output_shapes(self):
+        """
+        Allow subclasses to re-define outputs from @MIMO_MLP, since we won't
+        always directly predict values, but may instead predict the parameters
+        of a value distribution.
+        """
+        return OrderedDict(value=(1,))
+
+    def output_shape(self, input_shape=None):
+        """
+        Function to compute output shape from inputs to this module.
+
+        Args:
+            input_shape (iterable of int): shape of input. Does not include batch dimension.
+                Some modules may not need this argument, if their output does not depend
+                on the size of the input, or if they assume fixed size input.
+
+        Returns:
+            out_shape ([int]): list of integers corresponding to output shape
+        """
+        return [1]
+
+    def forward(self, obs_dict_1, obs_dict_2):
+        """
+        Forward through value network, and then optionally use tanh scaling.
+        """
+        obs_dict_combined = OrderedDict()
+        for key_1, key_2 in zip(obs_dict_1.keys(), obs_dict_2.keys()):
+            assert key_1 == key_2, "The keys you're trying to fuse are not the same!"
+            obs_dict_combined[key_1] = torch.cat((obs_dict_1[key_1], obs_dict_2[key_2]), dim = 1)
+        import pdb
+        pdb.set_trace() #checking if we did indeed combine things correctly
+        weights = super(WeighterNet, self).forward(obs=obs_dict_combined)["value"]
+        if self.weight_bounds is not None:
+            weights = self._weight_offset + self._weight_scale * torch.tanh(weights)
+        return weights
+
+    def _to_string(self):
+        return "weight_bounds={}".format(self.weight_bounds)
