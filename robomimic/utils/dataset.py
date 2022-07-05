@@ -33,7 +33,7 @@ class SequenceDataset(torch.utils.data.Dataset):
         filter_by_attribute=None,
         load_next_obs=True,
         priority = False,
-        weighting = False
+        weighting = False,
     ):
         """
         Dataset class for fetching sequences of experience.

@@ -434,15 +434,13 @@ class ObservationGroupEncoder(Module):
         assert set(self.observation_group_shapes.keys()).issubset(inputs), "{} does not contain all observation groups {}".format(
             list(inputs.keys()), list(self.observation_group_shapes.keys())
         )
-
         outputs = []
         # Deterministic order since self.observation_group_shapes is OrderedDict
         for obs_group in self.observation_group_shapes:
-            # pass through encoder
+            # pass through encoder, TEMPORARY DISABLE
             outputs.append(
                 self.nets[obs_group].forward(inputs[obs_group])
             )
-
         return torch.cat(outputs, dim=-1)
 
     def output_shape(self):

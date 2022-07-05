@@ -113,7 +113,7 @@ def load_data_for_training(config, obs_keys, modifications = None):
     return train_dataset, valid_dataset
 
 
-def dataset_factory(config, obs_keys, filter_by_attribute=None, dataset_path=None, priority = False, weighting = False, modifications = None):
+def dataset_factory(config, obs_keys, filter_by_attribute=None, dataset_path=None, priority = False, weighting = False, modifications = None, robot_only = False):
     """
     Create a SequenceDataset instance to pass to a torch DataLoader.
 
@@ -141,6 +141,11 @@ def dataset_factory(config, obs_keys, filter_by_attribute=None, dataset_path=Non
             if "corrections" not in config.train.dataset_keys:
                 config.train.dataset_keys.append("corrections")
 
+    if robot_only:
+        with config.values_unlocked():
+            config.train.dataset_keys.remove("actions")
+            config.train.dataset_keys.append("robot_actions")
+
     ds_kwargs = dict(
         hdf5_path=dataset_path,
         obs_keys=obs_keys,
@@ -157,7 +162,7 @@ def dataset_factory(config, obs_keys, filter_by_attribute=None, dataset_path=Non
         hdf5_normalize_obs=config.train.hdf5_normalize_obs,
         filter_by_attribute=filter_by_attribute,
         priority = priority,
-        weighting = weighting
+        weighting = weighting,
     )
     if modifications == "classifier":
         ds_kwargs["radius"] = config.train.radius
@@ -594,6 +599,7 @@ def run_epoch(model, data_loader,epoch, validate=False, num_steps=None, second_d
             if k not in step_log_dict:
                 step_log_dict[k] = []
             step_log_dict[k].append(step_log_all[i][k])
+
     step_log_all = dict((k, float(np.mean(v))) for k, v in step_log_dict.items())
 
     # add in timing stats

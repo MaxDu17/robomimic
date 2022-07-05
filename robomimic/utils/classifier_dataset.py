@@ -74,7 +74,7 @@ class ClassifierDataset(SequenceDataset):
 
         if np.random.rand() < 0.5:
             # picking a second index within a radius region, call it "same"
-            if index + offset > demo_end_index:
+            if index + offset >= demo_end_index:
                 second_index = index_in_demo - offset
             elif index - offset < demo_start_index:
                 second_index = index_in_demo + offset
@@ -82,10 +82,12 @@ class ClassifierDataset(SequenceDataset):
                 second_index = index_in_demo - offset
             else:
                 second_index = index_in_demo + offset
+            # print(f"same second index: {second_index}, first index: {index_in_demo}")
         else:
             # sampling outside of the radius regoin if not same
             perturb = np.random.randint(self.radius, viable_sample_size - self.radius)
             second_index = (index_in_demo + perturb) % viable_sample_size
+            # print(f"second index: {second_index}, first index: {index_in_demo}")
 
         keys = list(self.dataset_keys)
         data = self.get_dataset_sequence_from_demo(
@@ -112,6 +114,8 @@ class ClassifierDataset(SequenceDataset):
             seq_length=1,
             prefix="obs"
         )
+        # if not same:
+        #     data["obs_2"] = {key: -1 * (value) for key, value in data["obs_1"].items()}
         return data
 
 
