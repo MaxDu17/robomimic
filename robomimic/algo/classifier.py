@@ -25,7 +25,7 @@ def algo_config_to_class(algo_config = None):
 
 class VanillaWeighter(WeighingAlgo):
     """
-    Normal BC training.
+    A classification model
     """
     def _create_networks(self):
         """
@@ -56,7 +56,8 @@ class VanillaWeighter(WeighingAlgo):
         input_batch = dict()
         input_batch["obs_1"] = {k: batch["obs_1"][k][:, 0, :] for k in batch["obs_1"]}
         input_batch["obs_2"] = {k: batch["obs_2"][k][:, 0, :] for k in batch["obs_2"]}
-        input_batch["similarity"] = batch["similarity"][:, 0, :]
+        input_batch["label"] = batch["label"]
+
         return TensorUtils.to_device(TensorUtils.to_float(input_batch), self.device)
 
     def train_on_batch(self, batch, epoch, validate=False):
@@ -92,7 +93,7 @@ class VanillaWeighter(WeighingAlgo):
 
     def _forward_training(self, batch):
         """
-        Internal helper function for BC algo class. Compute forward pass
+        Internal helper function for weighting algo class. Compute forward pass
         and return network outputs in @predictions dict.
 
         Args:
@@ -103,13 +104,13 @@ class VanillaWeighter(WeighingAlgo):
             predictions (dict): dictionary containing network outputs
         """
         predictions = OrderedDict()
-        weights = self.nets["policy"](obs_dict_one=batch["obs_1"], obs_dict_two = batch["obs_2"])
-        predictions["similarity"] = weights
+        weights = self.nets["policy"](obs_dict_1=batch["obs_1"], obs_dict_2 = batch["obs_2"])
+        predictions["label"] = weights
         return predictions
 
     def _compute_losses(self, predictions, batch):
         """
-        Internal helper function for BC algo class. Compute losses based on
+        Internal helper function for weighting algo class. Compute losses based on
         network outputs in @predictions dict, using reference labels in @batch.
 
         Args:
@@ -121,14 +122,14 @@ class VanillaWeighter(WeighingAlgo):
             losses (dict): dictionary of losses computed over the batch
         """
         losses = OrderedDict()
-        s_target = batch["similarity"]
-        similarity = predictions["similarity"]
-        losses["BCE_loss"] = nn.BCELoss(s_target, similarity)
+        s_target = torch.unsqueeze(batch["label"], dim = 1) #to match shapes
+        similarity = predictions["label"]
+        losses["BCE_loss"] = nn.BCELoss()(similarity, s_target)
         return losses
 
     def _train_step(self, losses):
         """
-        Internal helper function for BC algo class. Perform backpropagation on the
+        Internal helper function for weighting algo class. Perform backpropagation on the
         loss tensors in @losses to update networks.
 
         Args:
@@ -156,7 +157,7 @@ class VanillaWeighter(WeighingAlgo):
         Returns:
             loss_log (dict): name -> summary statistic
         """
-        log = super(BC, self).log_info(info)
+        log = super(VanillaWeighter, self).log_info(info)
         log["Loss"] = info["losses"]["BCE_loss"].item()
         if "policy_grad_norms" in info:
             log["Policy_Grad_Norms"] = info["policy_grad_norms"]

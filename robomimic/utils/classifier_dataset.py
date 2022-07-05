@@ -34,7 +34,7 @@ class ClassifierDataset(SequenceDataset):
                  load_next_obs=True,
                  priority=False,
                  weighting=False,
-                 radius = 3):
+                 radius = 15):
         super(ClassifierDataset, self).__init__(
                  hdf5_path,
                  obs_keys,
@@ -58,38 +58,34 @@ class ClassifierDataset(SequenceDataset):
         """
         Fetch dataset sequence @index (inferred through internal index map), using the getitem_cache if available.
         """
-
         assert self.hdf5_cache_mode == "low_dim", "highdim not yet implemented on the classifier dataset"
         #varying positions
         same = np.random.rand() > 0.5 #the label
         offset = np.random.randint(self.radius)
 
         demo_id = self._index_to_demo_id[index]
+
+        #picking between the demos
         demo_start_index = self._demo_id_to_start_indices[demo_id]
         viable_sample_size = self._demo_id_to_demo_length[demo_id]
         demo_end_index = demo_start_index + viable_sample_size
         demo_index_offset = 0 if self.pad_frame_stack else (self.n_frame_stack - 1)  # only works for one frame stack
         index_in_demo = index - demo_start_index + demo_index_offset
-        # note: this logic does not work if the horizons are different lengths!
 
-
-
-        if index + offset > demo_end_index:
-            second_index = index_in_demo - offset
-        elif index - offset < demo_start_index:
-            second_index = index_in_demo + offset
-        elif np.random.rand() < 0.5: #coin toss if we aren't at the edge
-            second_index = index_in_demo - offset
+        if np.random.rand() < 0.5:
+            # picking a second index within a radius region, call it "same"
+            if index + offset > demo_end_index:
+                second_index = index_in_demo - offset
+            elif index - offset < demo_start_index:
+                second_index = index_in_demo + offset
+            elif np.random.rand() < 0.5: #coin toss if we aren't at the edge
+                second_index = index_in_demo - offset
+            else:
+                second_index = index_in_demo + offset
         else:
-            second_index = index_in_demo + offset
-
-        #picking between the demos
-        if same:
-            demo_id_2 = demo_id #same demo
-        else:
-            reduced_list = self.demos.copy()
-            reduced_list.remove(demo_id) # remaining trajectories
-            demo_id_2 = np.random.choice(reduced_list)
+            # sampling outside of the radius regoin if not same
+            perturb = np.random.randint(self.radius, viable_sample_size - self.radius)
+            second_index = (index_in_demo + perturb) % viable_sample_size
 
         keys = list(self.dataset_keys)
         data = self.get_dataset_sequence_from_demo(
@@ -109,7 +105,7 @@ class ClassifierDataset(SequenceDataset):
             prefix="obs"
         )
         data["obs_2"] = self.get_obs_sequence_from_demo(
-            demo_id_2,
+            demo_id,
             index_in_demo=second_index,
             keys=self.obs_keys,
             num_frames_to_stack=self.n_frame_stack - 1,

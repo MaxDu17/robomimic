@@ -54,12 +54,6 @@ class WeighterNet(MIMO_MLP):
                 obs_modality2: dict
                     ...
         """
-        self.weight_bounds = weight_bounds
-        if self.weight_bounds is not None:
-            # convert [lb, ub] to a scale and offset for the tanh output, which is in [-1, 1]
-            self._weight_scale = (float(self.weight_bounds[1]) - float(self.weight_bounds[0])) / 2.
-            self._weight_offset = (float(self.weight_bounds[1]) + float(self.weight_bounds[0])) / 2.
-
         assert isinstance(obs_shapes, OrderedDict)
         self.obs_shapes = obs_shapes
         for key in self.obs_shapes:
@@ -107,12 +101,9 @@ class WeighterNet(MIMO_MLP):
         for key_1, key_2 in zip(obs_dict_1.keys(), obs_dict_2.keys()):
             assert key_1 == key_2, "The keys you're trying to fuse are not the same!"
             obs_dict_combined[key_1] = torch.cat((obs_dict_1[key_1], obs_dict_2[key_2]), dim = 1)
-        import pdb
-        pdb.set_trace() #checking if we did indeed combine things correctly
         weights = super(WeighterNet, self).forward(obs=obs_dict_combined)["value"]
-        if self.weight_bounds is not None:
-            weights = self._weight_offset + self._weight_scale * torch.tanh(weights)
+        weights = torch.sigmoid(weights) #casts to probability distributoin
         return weights
 
     def _to_string(self):
-        return "weight_bounds={}".format(self.weight_bounds)
+        return ""
