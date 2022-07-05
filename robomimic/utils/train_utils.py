@@ -21,6 +21,7 @@ import robomimic.utils.tensor_utils as TensorUtils
 import robomimic.utils.log_utils as LogUtils
 
 from robomimic.utils.dataset import SequenceDataset
+from robomimic.utils.classifier_dataset import ClassifierDataset
 from robomimic.envs.env_base import EnvBase
 from robomimic.algo import RolloutPolicy
 
@@ -78,7 +79,7 @@ def get_exp_dir(config, auto_remove_exp_dir=False):
     return log_dir, output_dir, video_dir
 
 
-def load_data_for_training(config, obs_keys):
+def load_data_for_training(config, obs_keys, modifications = None):
     """
     Data loading at the start of an algorithm.
 
@@ -103,8 +104,8 @@ def load_data_for_training(config, obs_keys):
         if filter_by_attribute is not None:
             train_filter_by_attribute = "{}_{}".format(filter_by_attribute, train_filter_by_attribute)
             valid_filter_by_attribute = "{}_{}".format(filter_by_attribute, valid_filter_by_attribute)
-        train_dataset = dataset_factory(config, obs_keys, filter_by_attribute=train_filter_by_attribute)
-        valid_dataset = dataset_factory(config, obs_keys, filter_by_attribute=valid_filter_by_attribute)
+        train_dataset = dataset_factory(config, obs_keys, filter_by_attribute=train_filter_by_attribute, modifications = modifications)
+        valid_dataset = dataset_factory(config, obs_keys, filter_by_attribute=valid_filter_by_attribute, modifications = modifications)
     else:
         train_dataset = dataset_factory(config, obs_keys, filter_by_attribute=filter_by_attribute)
         valid_dataset = None
@@ -112,7 +113,7 @@ def load_data_for_training(config, obs_keys):
     return train_dataset, valid_dataset
 
 
-def dataset_factory(config, obs_keys, filter_by_attribute=None, dataset_path=None, priority = False):
+def dataset_factory(config, obs_keys, filter_by_attribute=None, dataset_path=None, priority = False, weighting = False, modifications = None):
     """
     Create a SequenceDataset instance to pass to a torch DataLoader.
 
@@ -155,9 +156,14 @@ def dataset_factory(config, obs_keys, filter_by_attribute=None, dataset_path=Non
         hdf5_use_swmr=config.train.hdf5_use_swmr,
         hdf5_normalize_obs=config.train.hdf5_normalize_obs,
         filter_by_attribute=filter_by_attribute,
-        priority = priority
+        priority = priority,
+        weighting = weighting
     )
-    dataset = SequenceDataset(**ds_kwargs)
+    if modifications == "classifier":
+        ds_kwargs["radius"] = config.train.radius
+        dataset = ClassifierDataset(**ds_kwargs)
+    else:
+        dataset = SequenceDataset(**ds_kwargs)
 
     return dataset
 

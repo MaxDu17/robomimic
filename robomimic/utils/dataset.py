@@ -92,6 +92,7 @@ class SequenceDataset(torch.utils.data.Dataset):
         self.priority = priority #if we priority sample from interventiosn only
         self.weighting = weighting
 
+        print(hdf5_cache_mode)
         assert hdf5_cache_mode in ["all", "low_dim", None]
         self.hdf5_cache_mode = hdf5_cache_mode
 
