@@ -57,9 +57,6 @@ class WeighterNet(MIMO_MLP):
         assert isinstance(obs_shapes, OrderedDict)
         self.obs_shapes = obs_shapes
 
-        for key in self.obs_shapes:
-            self.obs_shapes[key][0] *= 2 # early fusion here
-
         # set up different observation groups for @MIMO_MLP
         observation_group_shapes = OrderedDict()
         observation_group_shapes["obs"] = OrderedDict(self.obs_shapes)

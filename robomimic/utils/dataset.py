@@ -395,13 +395,30 @@ class SequenceDataset(torch.utils.data.Dataset):
                 self.hdf5_cache[ep]["attrs"]["model_file"] = hdf5_file["data/{}".format(ep)].attrs["model_file"]
         print(f"Now there are {len(self.hdf5_cache.keys())} demos in the buffer.")
 
-    def reweigh_data(self, intervention_set, classifier):
+    def reweight_data(self, intervention_set, classifier):
         assert self.weighting, "You must enable weighting to weigh the dataset!"
         assert self.hdf5_cache is not None, "Cachine is not yet implemented for weighted sampling"
         assert not self.priority, "Priority sampling is not yet implemented for weighted sampling"
-        num_samples = intervention_set.shape[0] # number of samples we are comparing
+        num_samples = len(intervention_set) # number of samples we are comparing
 
-        for index in LogUtils.custom_tqdm(self.total_num_sequences):
+        interventions_intermediate = {}
+        print("rewiring interventions")
+
+        # turning a queue of dicts into one dict
+        for sample in intervention_set:
+            for key in self.hdf5_cache["demo_1"]["obs"].keys(): #only select items that are used in the interventions
+                if key not in interventions_intermediate:
+                    interventions_intermediate[key] = list()
+                interventions_intermediate[key].append(sample[key])
+        interventions = {}
+
+        for key, value in interventions_intermediate.items():
+            interventions[key] = np.stack(value, axis = 0)
+
+        # a deque of dictionaries we want to unify as a single dictionary
+
+        for index in LogUtils.custom_tqdm(range(self.total_num_sequences)):
+
             demo_id = self._index_to_demo_id[index]
             demo_start_index = self._demo_id_to_start_indices[demo_id]
             # start at offset index if not padding for frame stacking
@@ -409,12 +426,11 @@ class SequenceDataset(torch.utils.data.Dataset):
             index_in_demo = index - demo_start_index + demo_index_offset
             #now, we just index and reweigh
             transition = {key: value[index_in_demo] for key, value in self.hdf5_cache[demo_id]["obs"].items()}
-            import pdb
-            pdb.set_trace()
             # just to verify that we are indeed slicing properly
-            transition = {key: np.tile(value, num_samples, axis = 0) for key, value in transition.items()} # make a pseudobatch
-            all_scores = classifier(intervention_set, transition)
-            self._weight_list[index] = all_scores
+            transition = {key: np.tile(value, (num_samples, 1)) for key, value in transition.items()} # make a pseudobatch
+
+            all_scores = classifier.similarity_score(interventions, transition)
+            self._weight_list[index] = all_scores.mean()
 
 
     def normalize_obs(self):
@@ -744,7 +760,11 @@ class SequenceDataset(torch.utils.data.Dataset):
         `DataLoader` documentation, for more info.
         """
         if self.weighting:
-            return WeightedRandomSampler(self._weight_list, self.total_num_sequences)  # if we are weighting
+            return torch.utils.data.sampler.WeightedRandomSampler(list(self._weight_list.values()), self.total_num_sequences)  # if we are weighting
         return None
+
+    def get_weight_list(self):
+        return list(self._weight_list.values())
+
 
 

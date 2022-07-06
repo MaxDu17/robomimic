@@ -60,7 +60,7 @@ class DataLogger(object):
             log_stats (bool): whether to store the mean/max/min/std for all data logged so far with key k
         """
 
-        assert data_type in ['scalar', 'image']
+        assert data_type in ['scalar', 'image', 'distribution']
 
         if data_type == 'scalar':
             # maybe update internal cache if logging stats for this key
@@ -71,6 +71,8 @@ class DataLogger(object):
 
         # maybe log to tensorboard
         if self._tb_logger is not None:
+            if data_type == 'distribution':
+                self._tb_logger.add_histogram(k, v, epoch)
             if data_type == 'scalar':
                 self._tb_logger.add_scalar(k, v, epoch)
                 if log_stats:
@@ -80,6 +82,7 @@ class DataLogger(object):
                         self._tb_logger.add_scalar(stat_k_name, stat_v, epoch)
             elif data_type == 'image':
                 self._tb_logger.add_images(k, img_tensor=v, global_step=epoch, dataformats="NHWC")
+
 
     def get_stats(self, k):
         """

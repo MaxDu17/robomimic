@@ -79,7 +79,7 @@ def get_exp_dir(config, auto_remove_exp_dir=False):
     return log_dir, output_dir, video_dir
 
 
-def load_data_for_training(config, obs_keys, modifications = None):
+def load_data_for_training(config, obs_keys, modifications = None, weighting = False):
     """
     Data loading at the start of an algorithm.
 
@@ -104,10 +104,10 @@ def load_data_for_training(config, obs_keys, modifications = None):
         if filter_by_attribute is not None:
             train_filter_by_attribute = "{}_{}".format(filter_by_attribute, train_filter_by_attribute)
             valid_filter_by_attribute = "{}_{}".format(filter_by_attribute, valid_filter_by_attribute)
-        train_dataset = dataset_factory(config, obs_keys, filter_by_attribute=train_filter_by_attribute, modifications = modifications)
-        valid_dataset = dataset_factory(config, obs_keys, filter_by_attribute=valid_filter_by_attribute, modifications = modifications)
+        train_dataset = dataset_factory(config, obs_keys, filter_by_attribute=train_filter_by_attribute, modifications = modifications, weighting = weighting)
+        valid_dataset = dataset_factory(config, obs_keys, filter_by_attribute=valid_filter_by_attribute, modifications = modifications, weighting = weighting)
     else:
-        train_dataset = dataset_factory(config, obs_keys, filter_by_attribute=filter_by_attribute)
+        train_dataset = dataset_factory(config, obs_keys, filter_by_attribute=filter_by_attribute, modifications = modifications, weighting = weighting)
         valid_dataset = None
 
     return train_dataset, valid_dataset
@@ -506,10 +506,10 @@ def weld_batches(first_batch, second_batch):
     combined = {}
     for key in first_batch.keys():
         # TEMPORARY FOR BASELINE
-        key2 = key if key != "actions" else "robot_actions"
+        # key2 = key if key != "actions" else "robot_actions"
 
         val1 = first_batch[key]
-        val2 = second_batch[key2]
+        val2 = second_batch[key]
         if type(val1) is torch.Tensor:
             combined[key] = torch.cat((val1, val2), dim = 0)
         else:# for obs

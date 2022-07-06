@@ -199,6 +199,14 @@ class VanillaWeighter(WeighingAlgo):
         :return:
         """
         assert not self.nets.training
+        obs_dict_one = TensorUtils.to_tensor(obs_dict_one)
+        obs_dict_one = TensorUtils.to_device(obs_dict_one, self.device)
+        obs_dict_one = TensorUtils.to_float(obs_dict_one)
+
+        obs_dict_two = TensorUtils.to_tensor(obs_dict_two)
+        obs_dict_two = TensorUtils.to_device(obs_dict_two, self.device)
+        obs_dict_two = TensorUtils.to_float(obs_dict_two)
+        
         return self.nets["policy"](obs_dict_one, obs_dict_two)
 
 class ContrastiveWeighter(WeighingAlgo):
