@@ -185,7 +185,6 @@ class ObservationEncoder(Module):
         Creates all networks and layers required by this encoder using the registered modalities.
         """
         assert not self._locked, "ObservationEncoder: layers have already been created"
-
         for k in self.obs_shapes:
             if self.obs_nets_classes[k] is not None:
                 # create net to process this modality
@@ -225,6 +224,7 @@ class ObservationEncoder(Module):
         feats = []
         for k in self.obs_shapes:
             x = obs_dict[k]
+            # x = self.bn[k](x)
             # maybe process encoder input with randomizer
             if self.obs_randomizers[k] is not None:
                 x = self.obs_randomizers[k].forward_in(x)

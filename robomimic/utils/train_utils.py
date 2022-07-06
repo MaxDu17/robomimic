@@ -505,8 +505,11 @@ def weld_batches(first_batch, second_batch):
     # assert first_batch.keys() == second_batch.keys(), "the batches have different keys!"
     combined = {}
     for key in first_batch.keys():
+        # TEMPORARY FOR BASELINE
+        key2 = key if key != "actions" else "robot_actions"
+
         val1 = first_batch[key]
-        val2 = second_batch[key]
+        val2 = second_batch[key2]
         if type(val1) is torch.Tensor:
             combined[key] = torch.cat((val1, val2), dim = 0)
         else:# for obs

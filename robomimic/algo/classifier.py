@@ -34,10 +34,15 @@ class VanillaWeighter(WeighingAlgo):
     """
     A classification model
     """
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.loss = nn.BCELoss()
+
     def _create_networks(self):
         """
         Creates networks and places them into @self.nets.
         """
+
         self.nets = nn.ModuleDict()
         self.nets["policy"] = WeighterNet.WeighterNet(
             obs_shapes = self.obs_shapes,
@@ -45,6 +50,8 @@ class VanillaWeighter(WeighingAlgo):
             mlp_layer_dims=self.algo_config.actor_layer_dims,
             encoder_kwargs=ObsUtils.obs_encoder_kwargs_from_config(self.obs_config.encoder),
         )
+
+
         self.nets = self.nets.float().to(self.device)
 
     def process_batch_for_training(self, batch):
@@ -64,6 +71,12 @@ class VanillaWeighter(WeighingAlgo):
         input_batch["obs_1"] = {k: batch["obs_1"][k][:, 0, :] for k in batch["obs_1"]}
         input_batch["obs_2"] = {k: batch["obs_2"][k][:, 0, :] for k in batch["obs_2"]}
         input_batch["label"] = batch["label"]
+
+        # DEBUGGING ONLY
+        # for i in range(100):
+        #     print(f"{input_batch['label'][i]}: {input_batch['obs_1']['robot0_eef_pos'][i].cpu().detach().numpy()}, {input_batch['obs_2']['robot0_eef_pos'][i].cpu().detach().numpy()}")
+        #     input()
+        # print(input_batch["label"])
 
         return TensorUtils.to_device(TensorUtils.to_float(input_batch), self.device)
 
@@ -93,7 +106,6 @@ class VanillaWeighter(WeighingAlgo):
 
             info["predictions"] = TensorUtils.detach(predictions)
             info["losses"] = TensorUtils.detach(losses)
-
             if not validate:
                 step_info = self._train_step(losses)
                 info.update(step_info)
@@ -113,6 +125,7 @@ class VanillaWeighter(WeighingAlgo):
             predictions (dict): dictionary containing network outputs
         """
         predictions = OrderedDict()
+
         weights = self.nets["policy"](obs_dict_1=batch["obs_1"], obs_dict_2 = batch["obs_2"])
         predictions["label"] = weights
         return predictions
@@ -133,7 +146,7 @@ class VanillaWeighter(WeighingAlgo):
         losses = OrderedDict()
         s_target = torch.unsqueeze(batch["label"], dim = 1) #to match shapes
         similarity = predictions["label"]
-        losses["BCE_loss"] = nn.BCELoss()(similarity, s_target)
+        losses["BCE_loss"] = self.loss(similarity, s_target)
         with torch.no_grad():
             hard_labels = (similarity > 0.5).float()
             accuracy = (hard_labels == s_target).float().sum()

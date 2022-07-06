@@ -72,7 +72,7 @@ class ClassifierDataset(SequenceDataset):
         demo_index_offset = 0 if self.pad_frame_stack else (self.n_frame_stack - 1)  # only works for one frame stack
         index_in_demo = index - demo_start_index + demo_index_offset
 
-        if np.random.rand() < 0.5:
+        if same:
             # picking a second index within a radius region, call it "same"
             if index + offset >= demo_end_index:
                 second_index = index_in_demo - offset
@@ -114,8 +114,6 @@ class ClassifierDataset(SequenceDataset):
             seq_length=1,
             prefix="obs"
         )
-        # if not same:
-        #     data["obs_2"] = {key: -1 * (value) for key, value in data["obs_1"].items()}
         return data
 
 
