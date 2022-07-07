@@ -35,6 +35,7 @@ class SequenceDataset(torch.utils.data.Dataset):
         load_next_obs=True,
         priority = False,
         weighting = False,
+        num_samples = None
     ):
         """
         Dataset class for fetching sequences of experience.
@@ -100,6 +101,7 @@ class SequenceDataset(torch.utils.data.Dataset):
 
         self.load_next_obs = load_next_obs
         self.filter_by_attribute = filter_by_attribute
+        self.sample_limit = num_samples # the maximum number of samples to load, for "crippling" the agent
 
         # get all keys that needs to be fetched
         self.obs_keys = tuple(obs_keys)
@@ -172,12 +174,17 @@ class SequenceDataset(torch.utils.data.Dataset):
                 filter key) are used.
         """
         # filter demo trajectory by mask
+
         if demos is not None:
             self.demos = demos
         elif filter_by_attribute is not None:
             self.demos = [elem.decode("utf-8") for elem in np.array(self.hdf5_file["mask/{}".format(filter_by_attribute)][:])]
         else:
             self.demos = list(self.hdf5_file["data"].keys()) #demo_0, demo_1, ...
+
+        if self.sample_limit is not None:
+            assert self.sample_limit <= len(self.demos), "The lower bound of sample size must be at most the number of avaiable samples!"
+            self.demos = self.demos[0 : self.sample_limit] # chopping off the rest
 
         # sort demo keys
         inds = np.argsort([int(elem[5:]) for elem in self.demos])

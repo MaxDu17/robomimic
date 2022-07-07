@@ -974,8 +974,6 @@ class VisualCore(EncoderCore, ConvBase):
         """
         super(VisualCore, self).__init__(input_shape=input_shape)
         self.flatten = flatten
-        import pdb
-        pdb.set_trace()
 
         # add input channel dimension to visual core inputs
         backbone_kwargs["input_channel"] = input_shape[0]

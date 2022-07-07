@@ -79,7 +79,7 @@ def get_exp_dir(config, auto_remove_exp_dir=False):
     return log_dir, output_dir, video_dir
 
 
-def load_data_for_training(config, obs_keys, modifications = None, weighting = False):
+def load_data_for_training(config, obs_keys, modifications = None, weighting = False, num_training_samples = None):
     """
     Data loading at the start of an algorithm.
 
@@ -87,6 +87,9 @@ def load_data_for_training(config, obs_keys, modifications = None, weighting = F
         config (BaseConfig instance): config object
         obs_keys (list): list of observation modalities that are required for
             training (this will inform the dataloader on what modalities to load)
+        modifications (str): modifications to sample behavior. this is mostly for deciding between classifier and sequence classes
+        weighting (bool): enable/disable a weighted dataset
+        num_training_samples (int): maximum number of training samples to use. Leave as "none" if you want to do a standard train/valid split
 
     Returns:
         train_dataset (SequenceDataset instance): train dataset object
@@ -95,7 +98,6 @@ def load_data_for_training(config, obs_keys, modifications = None, weighting = F
 
     # config can contain an attribute to filter on
     filter_by_attribute = config.train.hdf5_filter_key
-
     # load the dataset into memory
     if config.experiment.validate:
         assert not config.train.hdf5_normalize_obs, "no support for observation normalization with validation data yet"
@@ -104,16 +106,16 @@ def load_data_for_training(config, obs_keys, modifications = None, weighting = F
         if filter_by_attribute is not None:
             train_filter_by_attribute = "{}_{}".format(filter_by_attribute, train_filter_by_attribute)
             valid_filter_by_attribute = "{}_{}".format(filter_by_attribute, valid_filter_by_attribute)
-        train_dataset = dataset_factory(config, obs_keys, filter_by_attribute=train_filter_by_attribute, modifications = modifications, weighting = weighting)
+        train_dataset = dataset_factory(config, obs_keys, filter_by_attribute=train_filter_by_attribute, modifications = modifications, weighting = weighting, num_samples = num_training_samples)
         valid_dataset = dataset_factory(config, obs_keys, filter_by_attribute=valid_filter_by_attribute, modifications = modifications, weighting = weighting)
     else:
-        train_dataset = dataset_factory(config, obs_keys, filter_by_attribute=filter_by_attribute, modifications = modifications, weighting = weighting)
+        train_dataset = dataset_factory(config, obs_keys, filter_by_attribute=filter_by_attribute, modifications = modifications, weighting = weighting, num_samples = num_training_samples)
         valid_dataset = None
 
     return train_dataset, valid_dataset
 
 
-def dataset_factory(config, obs_keys, filter_by_attribute=None, dataset_path=None, priority = False, weighting = False, modifications = None, robot_only = False):
+def dataset_factory(config, obs_keys, filter_by_attribute=None, dataset_path=None, priority = False, weighting = False, modifications = None, robot_only = False, num_samples = None):
     """
     Create a SequenceDataset instance to pass to a torch DataLoader.
 
@@ -128,6 +130,12 @@ def dataset_factory(config, obs_keys, filter_by_attribute=None, dataset_path=Non
 
         dataset_path (str): if provided, the SequenceDataset instance should load
             data from this dataset path. Defaults to config.train.data.
+
+        priority (bool): if provided, this allows for sampling only the parts of the dataset that belong to an intervention
+
+        weighting (bool): enable/disable a weighted dataset
+
+        num_samples (int): maximum number of samples to use. Leave as "none" to take all that is avaiable
 
     Returns:
         dataset (SequenceDataset instance): dataset object
@@ -163,6 +171,7 @@ def dataset_factory(config, obs_keys, filter_by_attribute=None, dataset_path=Non
         filter_by_attribute=filter_by_attribute,
         priority = priority,
         weighting = weighting,
+        num_samples = num_samples
     )
     if modifications == "classifier":
         ds_kwargs["radius"] = config.train.radius
@@ -506,8 +515,9 @@ def weld_batches(first_batch, second_batch):
     combined = {}
     for key in first_batch.keys():
         # TEMPORARY FOR ROBOT ACTION baseline
-        # key2 = key if key != "actions" else "robot_actions"
-        key2 = key
+        key2 = key if key != "actions" else "robot_actions"
+        #######
+        # key2 = key
         val1 = first_batch[key]
         val2 = second_batch[key2]
         if type(val1) is torch.Tensor:
