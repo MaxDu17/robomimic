@@ -505,11 +505,11 @@ def weld_batches(first_batch, second_batch):
     # assert first_batch.keys() == second_batch.keys(), "the batches have different keys!"
     combined = {}
     for key in first_batch.keys():
-        # TEMPORARY FOR BASELINE
+        # TEMPORARY FOR ROBOT ACTION baseline
         # key2 = key if key != "actions" else "robot_actions"
-
+        key2 = key
         val1 = first_batch[key]
-        val2 = second_batch[key]
+        val2 = second_batch[key2]
         if type(val1) is torch.Tensor:
             combined[key] = torch.cat((val1, val2), dim = 0)
         else:# for obs
@@ -569,7 +569,7 @@ def run_epoch(model, data_loader,epoch, validate=False, num_steps=None, second_d
                 second_batch = next(second_data_loader_iter)
                 batch = weld_batches(batch, second_batch)
 
-        except StopIteration:
+        except StopIteration: # pass through again if needed
             # reset for next dataset pass
             data_loader_iter = iter(data_loader)
             if second_data_loader is not None:

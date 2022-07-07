@@ -7,6 +7,7 @@ import h5py
 import numpy as np
 from copy import deepcopy
 from contextlib import contextmanager
+from collections import deque
 
 import torch.utils.data
 
@@ -91,6 +92,7 @@ class SequenceDataset(torch.utils.data.Dataset):
 
         self.priority = priority #if we priority sample from interventiosn only
         self.weighting = weighting
+        self._last_samples = deque([], maxlen=10000)
 
         print(hdf5_cache_mode)
         assert hdf5_cache_mode in ["all", "low_dim", None]
@@ -395,7 +397,7 @@ class SequenceDataset(torch.utils.data.Dataset):
                 self.hdf5_cache[ep]["attrs"]["model_file"] = hdf5_file["data/{}".format(ep)].attrs["model_file"]
         print(f"Now there are {len(self.hdf5_cache.keys())} demos in the buffer.")
 
-    def reweight_data(self, intervention_set, classifier):
+    def reweight_data(self, intervention_set, classifier, THRESHOLD = 0):
         assert self.weighting, "You must enable weighting to weigh the dataset!"
         assert self.hdf5_cache is not None, "Cachine is not yet implemented for weighted sampling"
         assert not self.priority, "Priority sampling is not yet implemented for weighted sampling"
@@ -430,7 +432,10 @@ class SequenceDataset(torch.utils.data.Dataset):
             transition = {key: np.tile(value, (num_samples, 1)) for key, value in transition.items()} # make a pseudobatch
 
             all_scores = classifier.similarity_score(interventions, transition)
-            self._weight_list[index] = all_scores.mean()
+
+            mean_score = all_scores.mean().item()
+            mean_score = 0 if mean_score < THRESHOLD else mean_score
+            self._weight_list[index] = mean_score
 
 
     def normalize_obs(self):
@@ -555,7 +560,7 @@ class SequenceDataset(torch.utils.data.Dataset):
         if self.priority:
             # we map the index to the actual indices that it corresponds to
             index_in_demo = int(self.hdf5_cache[demo_id]["corrections"][index_in_demo])
-
+        self._last_samples.append(index_in_demo) #logging where in the rollout we care
         # end at offset index if not padding for seq length
         demo_length_offset = 0 if self.pad_seq_length else (self.seq_length - 1)
         end_index_in_demo = viable_sample_size - demo_length_offset
@@ -760,11 +765,14 @@ class SequenceDataset(torch.utils.data.Dataset):
         `DataLoader` documentation, for more info.
         """
         if self.weighting:
+            print("WEIGHTING SAMPLER")
             return torch.utils.data.sampler.WeightedRandomSampler(list(self._weight_list.values()), self.total_num_sequences)  # if we are weighting
         return None
 
     def get_weight_list(self):
         return list(self._weight_list.values())
 
+    def get_sample_distribution(self):
+        return list(self._last_samples)
 
 
