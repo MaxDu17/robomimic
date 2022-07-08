@@ -404,7 +404,13 @@ class SequenceDataset(torch.utils.data.Dataset):
                 self.hdf5_cache[ep]["attrs"]["model_file"] = hdf5_file["data/{}".format(ep)].attrs["model_file"]
         print(f"Now there are {len(self.hdf5_cache.keys())} demos in the buffer.")
 
-    def reweight_data(self, intervention_set, classifier, THRESHOLD = 0):
+    def reweight_data(self, intervention_set, classifier, THRESHOLD = 0, epsilon = 0.01):
+        """
+        :param intervention_set: a queue of dicts, each containing one observation
+        :param classifier: a pretrained classifier model that takes in two observations and predicts similarity score
+        :param THRESHOLD: a number below which everything is set to epsilon (to make it very unlikely to be sampled)
+        :param epsilon: a small number that substitues for 0 as the minimum (to prevent all weights from collapsing)
+        """
         assert self.weighting, "You must enable weighting to weigh the dataset!"
         assert self.hdf5_cache is not None, "Cachine is not yet implemented for weighted sampling"
         assert not self.priority, "Priority sampling is not yet implemented for weighted sampling"
@@ -441,7 +447,7 @@ class SequenceDataset(torch.utils.data.Dataset):
             all_scores = classifier.similarity_score(interventions, transition)
 
             mean_score = all_scores.mean().item()
-            mean_score = 0 if mean_score < THRESHOLD else mean_score
+            mean_score = epsilon if mean_score < THRESHOLD else mean_score
             self._weight_list[index] = mean_score
 
 

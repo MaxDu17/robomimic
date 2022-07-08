@@ -34,6 +34,7 @@ class ClassifierDataset(SequenceDataset):
                  load_next_obs=True,
                  priority=False,
                  weighting=False,
+                 num_samples=None,
                  radius = 15):
         super(ClassifierDataset, self).__init__(
                  hdf5_path,
@@ -51,7 +52,10 @@ class ClassifierDataset(SequenceDataset):
                  filter_by_attribute,
                  load_next_obs,
                  priority,
-                 weighting,)
+                 weighting,
+                 num_samples,
+            )
+        
         self.radius = radius
     # just overriding the sampling funcitonality
     def __getitem__(self, index):

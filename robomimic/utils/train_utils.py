@@ -80,6 +80,7 @@ def get_exp_dir(config, auto_remove_exp_dir=False):
 
 
 def load_data_for_training(config, obs_keys, modifications = None, weighting = False, num_training_samples = None):
+
     """
     Data loading at the start of an algorithm.
 
@@ -513,11 +514,17 @@ def save_model(model, config, env_meta, shape_meta, ckpt_path, obs_normalization
 def weld_batches(first_batch, second_batch):
     # assert first_batch.keys() == second_batch.keys(), "the batches have different keys!"
     combined = {}
+    flag = False
+    # a little hacky, but it's for a specific baseline only
+    if "robot_actions" in second_batch:
+        flag = True
     for key in first_batch.keys():
-        # TEMPORARY FOR ROBOT ACTION baseline
-        key2 = key if key != "actions" else "robot_actions"
-        #######
-        # key2 = key
+        # the problem is a mismatched key, which we solve by just rewiring them. It's not elegant but it works
+        if flag:
+            key2 = key if key != "actions" else "robot_actions"
+        else:
+            key2 = key
+
         val1 = first_batch[key]
         val2 = second_batch[key2]
         if type(val1) is torch.Tensor:
