@@ -177,6 +177,7 @@ class EnvRobosuite(EB.EnvBase):
             di (dict): current raw observation dictionary from robosuite to wrap and provide 
                 as a dictionary. If not provided, will be queried from robosuite.
         """
+
         if di is None:
             di = self.env._get_observations(force_update=True) if self._is_v1 else self.env._get_observation()
         ret = {}

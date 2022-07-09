@@ -378,7 +378,7 @@ def policy_from_checkpoint(device=None, ckpt_path=None, ckpt_dict=None, verbose=
     return model, ckpt_dict
 
 
-def env_from_checkpoint(ckpt_path=None, ckpt_dict=None, env_name=None, render=False, render_offscreen=False, verbose=False):
+def env_from_checkpoint(ckpt_path=None, ckpt_dict=None, env_name=None, render=False, render_offscreen=False, verbose=False, use_object = None):
     """
     Creates an environment using the metadata saved in a checkpoint.
 
@@ -394,6 +394,8 @@ def env_from_checkpoint(ckpt_path=None, ckpt_dict=None, env_name=None, render=Fa
         render_offscreen (bool): if True, environment supports off-screen rendering. This
             is forced to be True if saved model uses image observations.
 
+        use_object (bool / None): if this is used, then we override what the configuration says about the object information (used for ground truth models)
+
     Returns:
         env (EnvBase instance): environment created using checkpoint
 
@@ -405,6 +407,10 @@ def env_from_checkpoint(ckpt_path=None, ckpt_dict=None, env_name=None, render=Fa
     # metadata from model dict to get info needed to create environment
     env_meta = ckpt_dict["env_metadata"]
     shape_meta = ckpt_dict["shape_metadata"]
+
+    # manual override
+    if use_object is not None:
+        env_meta["env_kwargs"]["use_object_obs"] = use_object
 
     # create env from saved metadata
     env = EnvUtils.create_env_from_metadata(

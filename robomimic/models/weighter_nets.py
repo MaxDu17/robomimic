@@ -95,7 +95,6 @@ class WeighterNet(MIMO_MLP):
         """
         Forward through value network, and then optionally use tanh scaling.
         """
-
         obs_dict_combined = OrderedDict()
         for key_1, key_2 in zip(obs_dict_1.keys(), obs_dict_2.keys()):
             assert key_1 == key_2, "The keys you're trying to fuse are not the same!"
