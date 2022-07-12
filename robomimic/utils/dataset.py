@@ -233,6 +233,7 @@ class SequenceDataset(torch.utils.data.Dataset):
                 self._weight_list[self.total_num_sequences] = 1
                 self.total_num_sequences += 1
 
+
     @property
     def hdf5_file(self):
         """
@@ -421,7 +422,7 @@ class SequenceDataset(torch.utils.data.Dataset):
 
         # turning a queue of dicts into one dict
         for sample in intervention_set:
-            for key in self.hdf5_cache["demo_1"]["obs"].keys(): #only select items that are used in the interventions
+            for key in self.obs_keys: #only select items that are used in the interventions
                 if key not in interventions_intermediate:
                     interventions_intermediate[key] = list()
                 interventions_intermediate[key].append(sample[key])
@@ -429,26 +430,40 @@ class SequenceDataset(torch.utils.data.Dataset):
 
         for key, value in interventions_intermediate.items():
             interventions[key] = np.stack(value, axis = 0)
+        interventions = ObsUtils.process_obs_dict(interventions) #normalize and change shapes
+        index = 0
 
-        # a deque of dictionaries we want to unify as a single dictionary
+        for demo in LogUtils.custom_tqdm(self.demos):
+            all_demo_data = {key : self.get_dataset_for_ep(demo, f"obs/{key}") for key in self.obs_keys}
+            for index_in_demo in range(self._demo_id_to_demo_length[demo]):
+                transition = {key: value[index_in_demo] for key, value in all_demo_data.items()}
+                transition = {key: np.repeat(np.expand_dims(value, 0), num_samples, axis = 0) for key, value in
+                              transition.items()}  # make a pseudobatch
+                transition = ObsUtils.process_obs_dict(transition) #normalize and change shapes
+                all_scores = classifier.similarity_score(interventions, transition)
 
-        for index in LogUtils.custom_tqdm(range(self.total_num_sequences)):
+                mean_score = all_scores.mean().item()
+                mean_score = epsilon if mean_score < THRESHOLD else mean_score
+                self._weight_list[index] = mean_score
+                index += 1
 
-            demo_id = self._index_to_demo_id[index]
-            demo_start_index = self._demo_id_to_start_indices[demo_id]
-            # start at offset index if not padding for frame stacking
-            demo_index_offset = 0 if self.pad_frame_stack else (self.n_frame_stack - 1) #only works for one frame stack
-            index_in_demo = index - demo_start_index + demo_index_offset
-            #now, we just index and reweigh
-            transition = {key: value[index_in_demo] for key, value in self.hdf5_cache[demo_id]["obs"].items()}
-            # just to verify that we are indeed slicing properly
-            transition = {key: np.tile(value, (num_samples, 1)) for key, value in transition.items()} # make a pseudobatch
-
-            all_scores = classifier.similarity_score(interventions, transition)
-
-            mean_score = all_scores.mean().item()
-            mean_score = epsilon if mean_score < THRESHOLD else mean_score
-            self._weight_list[index] = mean_score
+        # for index in LogUtils.custom_tqdm(range(self.total_num_sequences)):
+        #     demo_id = self._index_to_demo_id[index]
+        #     #TODO: don't fetch every time; that's inefficient
+        #     demo_start_index = self._demo_id_to_start_indices[demo_id]
+        #     # start at offset index if not padding for frame stacking
+        #     demo_index_offset = 0 if self.pad_frame_stack else (self.n_frame_stack - 1) #only works for one frame stack
+        #     index_in_demo = index - demo_start_index + demo_index_offset
+        #     #now, we just index and reweigh
+        #     transition = {key: value[index_in_demo] for key, value in self.hdf5_cache[demo_id]["obs"].items()}
+        #     # just to verify that we are indeed slicing properly
+        #     transition = {key: np.tile(value, (num_samples, 1)) for key, value in transition.items()} # make a pseudobatch
+        #
+        #     all_scores = classifier.similarity_score(interventions, transition)
+        #
+        #     mean_score = all_scores.mean().item()
+        #     mean_score = epsilon if mean_score < THRESHOLD else mean_score
+        #     self._weight_list[index] = mean_score
 
 
     def normalize_obs(self):
@@ -523,7 +538,6 @@ class SequenceDataset(torch.utils.data.Dataset):
         Helper utility to get a dataset for a specific demonstration.
         Takes into account whether the dataset has been loaded into memory.
         """
-
         # check if this key should be in memory
         key_should_be_in_memory = (self.hdf5_cache_mode in ["all", "low_dim"])
         if key_should_be_in_memory:

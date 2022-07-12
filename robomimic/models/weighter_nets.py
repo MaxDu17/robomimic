@@ -99,12 +99,7 @@ class WeighterNet(MIMO_MLP):
         for key_1, key_2 in zip(obs_dict_1.keys(), obs_dict_2.keys()):
             assert key_1 == key_2, "The keys you're trying to fuse are not the same!"
             obs_dict_combined[key_1] = torch.cat((obs_dict_1[key_1], obs_dict_2[key_2]), dim = 1)
-            # obs_dict_combined[key_1] = (obs_dict_1[key_1] - obs_dict_2[key_2])
 
-        torch.set_printoptions(sci_mode=False)
-
-
-        # input(obs_dict_combined)
         weights = super(WeighterNet, self).forward(obs=obs_dict_combined)["value"]
         weights = torch.sigmoid(weights)
         return weights

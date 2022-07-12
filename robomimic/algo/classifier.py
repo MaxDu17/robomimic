@@ -72,12 +72,6 @@ class VanillaWeighter(WeighingAlgo):
         input_batch["obs_2"] = {k: batch["obs_2"][k][:, 0, :] for k in batch["obs_2"]}
         input_batch["label"] = batch["label"]
 
-        # DEBUGGING ONLY
-        # for i in range(100):
-        #     print(f"{input_batch['label'][i]}: {input_batch['obs_1']['robot0_eef_pos'][i].cpu().detach().numpy()}, {input_batch['obs_2']['robot0_eef_pos'][i].cpu().detach().numpy()}")
-        #     input()
-        # print(input_batch["label"])
-
         return TensorUtils.to_device(TensorUtils.to_float(input_batch), self.device)
 
     def train_on_batch(self, batch, epoch, validate=False):
