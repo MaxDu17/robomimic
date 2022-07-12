@@ -447,23 +447,30 @@ class SequenceDataset(torch.utils.data.Dataset):
                 self._weight_list[index] = mean_score
                 index += 1
 
-        # for index in LogUtils.custom_tqdm(range(self.total_num_sequences)):
-        #     demo_id = self._index_to_demo_id[index]
-        #     #TODO: don't fetch every time; that's inefficient
-        #     demo_start_index = self._demo_id_to_start_indices[demo_id]
-        #     # start at offset index if not padding for frame stacking
-        #     demo_index_offset = 0 if self.pad_frame_stack else (self.n_frame_stack - 1) #only works for one frame stack
-        #     index_in_demo = index - demo_start_index + demo_index_offset
-        #     #now, we just index and reweigh
-        #     transition = {key: value[index_in_demo] for key, value in self.hdf5_cache[demo_id]["obs"].items()}
-        #     # just to verify that we are indeed slicing properly
-        #     transition = {key: np.tile(value, (num_samples, 1)) for key, value in transition.items()} # make a pseudobatch
-        #
-        #     all_scores = classifier.similarity_score(interventions, transition)
-        #
-        #     mean_score = all_scores.mean().item()
-        #     mean_score = epsilon if mean_score < THRESHOLD else mean_score
-        #     self._weight_list[index] = mean_score
+    def visualize_demo(self, num_demos, video_writer):
+        demos = np.random.choice(self.demos, num_demos)
+        max_length = 0
+        # finding the maximum
+        for demo in demos.tolist():
+            if self._demo_id_to_demo_length[demo] > max_length:
+                max_length = self._demo_id_to_demo_length[demo]
+
+        for index_in_demo in LogUtils.custom_tqdm(range(max_length)):
+            frame_list = list()
+            for demo in demos:
+                frames = self.get_dataset_for_ep(demo, "obs/agentview_image")
+                demo_start_index = self._demo_id_to_start_indices[demo]
+                if index_in_demo < self._demo_id_to_demo_length[demo]:
+                    current_frame = frames[index_in_demo]
+                    current_frame[0:20, :, :] = 0
+                    weight = self._weight_list[demo_start_index + index_in_demo]
+                    current_frame[0:20, 0: int(weight * 84), :] = 255 #height of bar related to the weight given
+                else:
+                    current_frame = np.zeros_like(frames[0]) #make a black screen
+                frame_list.append(current_frame)
+
+            large_frame = np.concatenate(frame_list, axis = 0)
+            video_writer.append_data(large_frame)
 
 
     def normalize_obs(self):
