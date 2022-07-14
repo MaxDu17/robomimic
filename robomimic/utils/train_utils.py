@@ -537,7 +537,9 @@ def weld_batches(first_batch, second_batch):
                 combined[key][inner_key] = torch.cat((inner_val1, inner_val2), dim = 0)
     return combined
 
-def run_epoch(model, data_loader,epoch, validate=False, num_steps=None, second_data_loader = None):
+def run_epoch(model, data_loader,epoch, validate=False, num_steps=None, second_data_loader = None,
+              stopping = "step",
+              stopping_norm = 5000000):
     """
     Run an epoch of training or validation.
 
@@ -556,6 +558,8 @@ def run_epoch(model, data_loader,epoch, validate=False, num_steps=None, second_d
             otherwise the epoch is a complete pass through the training dataset
 
         second_data_loader (DataLoader instance): second replay buffer to sample from (see data_loader)
+        stopping (str): either "step", "grad", or "valid". Step means step limited epoch, "grad" means early termination
+        with grad norms, and "valid" means early termination using a validation set (not implemented yet)
 
     Returns:
         step_log_all (dict): dictionary of logged training metrics averaged across all batches
@@ -576,6 +580,7 @@ def run_epoch(model, data_loader,epoch, validate=False, num_steps=None, second_d
     if second_data_loader is not None:
         second_data_loader_iter = iter(second_data_loader)
 
+    norm_list = list()
     for _ in LogUtils.custom_tqdm(range(num_steps)):
 
         # load next batch from data loader
@@ -602,8 +607,11 @@ def run_epoch(model, data_loader,epoch, validate=False, num_steps=None, second_d
 
         # forward and backward pass
         t = time.time()
-
         info = model.train_on_batch(input_batch, epoch, validate=validate)
+        norm_list.append(info["policy_grad_norms"])
+        if stopping == "norm" and np.mean(norm_list) < stopping_norm: # empirical value
+            print("early termination (norm)")
+            break
         timing_stats["Train_Batch"].append(time.time() - t)
 
         # tensorboard logging

@@ -809,4 +809,3 @@ class SequenceDataset(torch.utils.data.Dataset):
     def get_sample_distribution(self):
         return list(self._last_samples)
 
-

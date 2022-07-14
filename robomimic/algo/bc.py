@@ -277,6 +277,21 @@ class BC_Gaussian(BC):
         )
         return predictions
 
+    def diagnose(self, batch):
+
+        batch = TensorUtils.to_device(TensorUtils.to_float(batch), self.device)
+
+        dists = self.nets["policy"].forward_train(
+            obs_dict=batch["obs"],
+        )
+
+        # make sure that this is a batch of multivariate action distributions, so that
+        # the log probability computation will be correct
+        assert len(dists.batch_shape) == 1
+        log_probs = dists.log_prob(batch["actions"])
+        stdev = dist.stddev()
+        return log_probs, stdev
+
     def _compute_losses(self, predictions, batch):
         """
         Internal helper function for BC algo class. Compute losses based on
@@ -625,6 +640,19 @@ class BC_RNN_GMM(BC_RNN):
             log_probs=-action_loss,
             action_loss=action_loss,
         )
+
+    def diagnose(self, batch):
+        batch = TensorUtils.to_device(TensorUtils.to_float(batch), self.device)
+        
+        dists = self.nets["policy"].forward_train(
+            obs_dict=batch["obs"],
+        )
+        # make sure that this is a batch of multivariate action distributions, so that
+        # the log probability computation will be correct
+        log_probs = dists.log_prob(batch["actions"])
+        mse = torch.nn.MSELoss()(dists.mean, batch["actions"])
+        stdev = dists.stddev
+        return log_probs, stdev, mse
 
     def log_info(self, info):
         """
