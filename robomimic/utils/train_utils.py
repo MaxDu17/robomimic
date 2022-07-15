@@ -499,6 +499,7 @@ def save_model(model, config, env_meta, shape_meta, ckpt_path, obs_normalization
     shape_meta = deepcopy(shape_meta)
     params = dict(
         model=model.serialize(),
+        optimizer = model.optim_serialize(), #save optimizer parameters
         config=config.dump(),
         algo_name=config.algo_name,
         env_metadata=env_meta,
@@ -608,10 +609,11 @@ def run_epoch(model, data_loader,epoch, validate=False, num_steps=None, second_d
         # forward and backward pass
         t = time.time()
         info = model.train_on_batch(input_batch, epoch, validate=validate)
-        norm_list.append(info["policy_grad_norms"])
-        if stopping == "norm" and np.mean(norm_list) < stopping_norm: # empirical value
-            print("early termination (norm)")
-            break
+        if not validate:
+            norm_list.append(info["policy_grad_norms"])
+            if stopping == "norm" and np.mean(norm_list) < stopping_norm: # empirical value
+                print("early termination (norm)")
+                break
         timing_stats["Train_Batch"].append(time.time() - t)
 
         # tensorboard logging

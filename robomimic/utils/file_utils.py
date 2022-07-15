@@ -366,6 +366,10 @@ def policy_from_checkpoint(device=None, ckpt_path=None, ckpt_dict=None, verbose=
         device=device,
     )
     model.deserialize(ckpt_dict["model"])
+
+    if "optimizer" in ckpt_dict:
+        model.optim_deserialize(ckpt_dict["optimizer"])
+
     if trainable:
         return model, ckpt_dict
     

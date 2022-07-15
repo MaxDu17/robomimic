@@ -269,6 +269,22 @@ class Algo(object):
         """
         return self.nets.state_dict()
 
+    def optim_serialize(self):
+        """
+        Get dictionary of current optimizer parameters
+        """
+        return {key : value.state_dict() for key, value in self.optimizers.items()}
+
+    def optim_deserialize(self, optim_dict):
+        """
+        Load optimizers from a checkpoint (for parameters updated during training) 
+        :param optim_dict:
+        :return:
+        """
+        for key, value in optim_dict.items():
+            self.optimizers[key].load_state_dict(value)
+
+
     def deserialize(self, model_dict):
         """
         Load model from a checkpoint.
