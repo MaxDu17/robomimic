@@ -281,8 +281,10 @@ class Algo(object):
         :param optim_dict:
         :return:
         """
+        print("Loading optimizers!")
         for key, value in optim_dict.items():
             self.optimizers[key].load_state_dict(value)
+
 
 
     def deserialize(self, model_dict):

@@ -560,6 +560,12 @@ class BC_RNN(BC):
         self._rnn_hidden_state = None
         self._rnn_counter = 0
 
+    def return_state(self):
+        return self._rnn_hidden_state
+
+    def load_state(self, state):
+        self._rnn_hidden_state = state
+
 
 class BC_RNN_GMM(BC_RNN):
     """

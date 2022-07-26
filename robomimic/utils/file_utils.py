@@ -311,7 +311,8 @@ def config_from_checkpoint(algo_name=None, ckpt_path=None, ckpt_dict=None, verbo
     return config, ckpt_dict
 
 
-def policy_from_checkpoint(device=None, ckpt_path=None, ckpt_dict=None, verbose=False, trainable = False):
+def policy_from_checkpoint(device=None, ckpt_path=None, ckpt_dict=None, verbose=False, trainable = False, load_optimizer = True,
+                           learning_rate = None, re_init = False):
     """
     This function restores a trained policy from a checkpoint file or
     loaded model dictionary.
@@ -339,6 +340,10 @@ def policy_from_checkpoint(device=None, ckpt_path=None, ckpt_dict=None, verbose=
     algo_name, _ = algo_name_from_checkpoint(ckpt_dict=ckpt_dict)
     config, _ = config_from_checkpoint(algo_name=algo_name, ckpt_dict=ckpt_dict, verbose=verbose)
 
+    if learning_rate is not None:
+        print("Custom learning rate!")
+        with config.values_unlocked():
+            config.algo.optim_params.policy.learning_rate.initial = learning_rate
     # read config to set up metadata for observation modalities (e.g. detecting rgb observations)
     ObsUtils.initialize_obs_utils_with_config(config)
 
@@ -365,10 +370,14 @@ def policy_from_checkpoint(device=None, ckpt_path=None, ckpt_dict=None, verbose=
         ac_dim=shape_meta["ac_dim"],
         device=device,
     )
-    model.deserialize(ckpt_dict["model"])
+    if not re_init:
+        print("loading parameters!")
+        model.deserialize(ckpt_dict["model"])
 
-    if "optimizer" in ckpt_dict:
-        model.optim_deserialize(ckpt_dict["optimizer"])
+        # restores optimizer states
+        if "optimizer" in ckpt_dict and load_optimizer:
+            print("loading optimizer!")
+            model.optim_deserialize(ckpt_dict["optimizer"])
 
     if trainable:
         return model, ckpt_dict

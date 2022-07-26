@@ -101,6 +101,9 @@ def optimizer_from_optim_params(net_optim_params, net):
     Returns:
         optimizer (torch.optim.Optimizer): optimizer
     """
+    # input("loading SGD!")
+    # return optim.SGD(params = net.parameters(), lr = 0.0005)
+    # TEMPORARY EXPERIMENT
     return optim.Adam(
         params=net.parameters(),
         lr=net_optim_params["learning_rate"]["initial"],
