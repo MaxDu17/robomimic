@@ -10,8 +10,9 @@ class WeightConfig(BaseConfig):
 
     def train_config(self):
         super().train_config()
-        self.train.radius = 3
+        self.train.radius = 30
         self.train.alpha = 6
+        self.train.actions = False
         self.train.mode = "classifier"
         
     def algo_config(self):
@@ -94,7 +95,10 @@ class WeightContrastiveConfig(BaseConfig):
 
     def train_config(self):
         super().train_config()
-        self.train.radius = 3
+        self.train.radius = 30
+        self.train.alpha = 6
+        self.train.actions = False
+        self.train.mode = "classifier"
 
     def algo_config(self):
         """

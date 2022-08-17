@@ -35,7 +35,8 @@ class ClassifierDataset(SequenceDataset):
                  priority=False,
                  weighting=False,
                  num_samples=None,
-                 radius = 15):
+                 radius = 15,
+                 use_actions = False):
         super(ClassifierDataset, self).__init__(
                  hdf5_path,
                  obs_keys,
@@ -57,6 +58,8 @@ class ClassifierDataset(SequenceDataset):
             )
         
         self.radius = radius
+        self.use_actions = use_actions
+
     # just overriding the sampling funcitonality
     def __getitem__(self, index):
         """
@@ -94,20 +97,23 @@ class ClassifierDataset(SequenceDataset):
             # print(f"second index: {second_index}, first index: {index_in_demo}")
 
         keys = list(self.dataset_keys)
-        data = self.get_dataset_sequence_from_demo(
-            demo_id,
-            index_in_demo=index_in_demo,
-            keys=tuple(keys),
-            seq_length=self.seq_length
-        )
+
+        data = {}
+        # data = self.get_dataset_sequence_from_demo(
+        #     demo_id,
+        #     index_in_demo=index_in_demo,
+        #     keys=tuple(keys),
+        #     seq_length=self.seq_length
+        # )
 
         data["label"] = same
+
         data["obs_1"] = self.get_obs_sequence_from_demo(
             demo_id,
             index_in_demo=index_in_demo,
             keys=self.obs_keys,
             num_frames_to_stack=self.n_frame_stack - 1,
-            seq_length=1,
+            seq_length = 1,
             prefix="obs"
         )
         data["obs_2"] = self.get_obs_sequence_from_demo(
@@ -115,9 +121,28 @@ class ClassifierDataset(SequenceDataset):
             index_in_demo=second_index,
             keys=self.obs_keys,
             num_frames_to_stack=self.n_frame_stack - 1,
-            seq_length=1,
+            seq_length = 1,
             prefix="obs"
         )
+
+        if self.use_actions:
+            actions, _ = self.get_sequence_from_demo(
+                demo_id,
+                index_in_demo=index_in_demo,
+                keys=["actions"],
+                num_frames_to_stack=0,  # don't frame stack for meta keys
+                seq_length = 1,
+            )
+            data["obs_1"].update(actions)
+            actions, _ = self.get_sequence_from_demo(
+                demo_id,
+                index_in_demo=second_index,
+                keys=["actions"],
+                num_frames_to_stack=0,  # don't frame stack for meta keys
+                seq_length=1,
+            )
+            data["obs_2"].update(actions)
+
         return data
 
 

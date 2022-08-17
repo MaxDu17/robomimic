@@ -15,6 +15,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from copy import deepcopy
+
 
 @register_algo_factory_func("weight")
 def algo_config_to_class(algo_config = None):
@@ -91,11 +93,12 @@ class VanillaWeighter(WeighingAlgo):
             info (dict): dictionary of relevant inputs, outputs, and losses
                 that might be relevant for logging
         """
+
         with TorchUtils.maybe_no_grad(no_grad=validate):
             info = super(VanillaWeighter, self).train_on_batch(batch, epoch, validate=validate)
             predictions = self._forward_training(batch)
 
-            losses, accuracy = self._compute_losses(predictions, batch)
+            losses, accuracy = self._compute_losses(predictions, labels)
             info["accuracy"] = TensorUtils.detach(accuracy)
 
             info["predictions"] = TensorUtils.detach(predictions)
@@ -267,10 +270,12 @@ class ContrastiveWeighter(WeighingAlgo):
         with TorchUtils.maybe_no_grad(no_grad=validate):
             # this just gets an empty dictionary
             info = super(ContrastiveWeighter, self).train_on_batch(batch_1, epoch, validate=validate)
+            
             predictions = self._forward_training(batch_1, batch_2)
 
-            losses, accuracy = self._compute_losses(predictions, labels)
-            info["accuracy"] = TensorUtils.detach(accuracy)
+            losses, true_positive, true_negative = self._compute_losses(predictions, labels)
+            info["true_positive"] = TensorUtils.detach(true_positive)
+            info["true_negative"] = TensorUtils.detach(true_negative)
 
             info["predictions"] = TensorUtils.detach(predictions)
             info["losses"] = TensorUtils.detach(losses)
@@ -314,18 +319,23 @@ class ContrastiveWeighter(WeighingAlgo):
             losses (dict): dictionary of losses computed over the batch
         """
         losses = OrderedDict()
+
         s_target = torch.unsqueeze(labels, dim = 1) #to match shapes
-        s_target[s_target == 0] = -1 # needed transformatoin for cosine
+        cos_target = deepcopy(s_target)
+        cos_target[s_target == 0] = -1 # needed transformation for cosine
+        s_target = s_target.type(torch.bool)
 
         embedding_1, embedding_2 = predictions["embedding_1"]["value"], predictions["embedding_2"]["value"]
-        losses["embedding_cosine_loss"] = nn.CosineEmbeddingLoss()(embedding_1, embedding_2, s_target)
+        # force -1 and 1 labels
+        losses["embedding_cosine_loss"] = nn.CosineEmbeddingLoss(margin = -1)(embedding_1, embedding_2, cos_target)
         with torch.no_grad():
-            import pdb
-            pdb.set_trace()
             # how many embeddings are less than orthogonal?
-            hard_labels = s_target * (torch.cosine_similarity(embedding_1, embedding_2) > 0)
-            accuracy = (hard_labels).float().mean()
-        return losses, accuracy
+            true_positive = s_target * (torch.cosine_similarity(embedding_1, embedding_2) > 0)
+            true_negative = (~s_target) * (torch.cosine_similarity(embedding_1, embedding_2) < 0)
+            true_positive = true_positive.float().mean()
+            true_negative = true_negative.float().mean()
+            # print(true_positive, true_negative)
+        return losses, true_positive, true_negative
 
 
     def _train_step(self, losses):
@@ -360,8 +370,10 @@ class ContrastiveWeighter(WeighingAlgo):
         """
         log = super(ContrastiveWeighter, self).log_info(info)
         log["Loss"] = info["losses"]["embedding_cosine_loss"].item()
-        if "accuracy" in info:
-            log["accuracy"] = info["accuracy"].item()
+        if "true_positive" in info:
+            log["true_positive"] = info["true_positive"].item()
+        if "true_negative" in info:
+            log["true_negative"] = info["true_negative"].item()
         if "policy_grad_norms" in info:
             log["Policy_Grad_Norms"] = info["policy_grad_norms"]
         return log

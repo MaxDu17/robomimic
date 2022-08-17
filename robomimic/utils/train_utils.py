@@ -177,6 +177,7 @@ def dataset_factory(config, obs_keys, filter_by_attribute=None, dataset_path=Non
     )
     if modifications == "classifier":
         ds_kwargs["radius"] = config.train.radius
+        ds_kwargs["use_actions"] = config.train.actions
         dataset = ClassifierDataset(**ds_kwargs)
     elif modifications == "soft_classifier":
         ds_kwargs["alpha"] = config.train.alpha
