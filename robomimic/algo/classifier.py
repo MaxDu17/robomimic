@@ -267,6 +267,7 @@ class ContrastiveWeighter(WeighingAlgo):
                 that might be relevant for logging
         """
         batch_1, batch_2, labels = batch # different batch strcutrue
+
         with TorchUtils.maybe_no_grad(no_grad=validate):
             # this just gets an empty dictionary
             info = super(ContrastiveWeighter, self).train_on_batch(batch_1, epoch, validate=validate)
@@ -301,6 +302,8 @@ class ContrastiveWeighter(WeighingAlgo):
         predictions = OrderedDict()
         embedding_1 = self.nets["policy"](obs=batch_1["obs"])
         embedding_2 = self.nets["policy"](obs=batch_2["obs"])
+
+
         predictions["embedding_1"] = embedding_1
         predictions["embedding_2"] = embedding_2
         return predictions
@@ -320,7 +323,7 @@ class ContrastiveWeighter(WeighingAlgo):
         """
         losses = OrderedDict()
 
-        s_target = torch.unsqueeze(labels, dim = 1) #to match shapes
+        s_target = labels
         cos_target = deepcopy(s_target)
         cos_target[s_target == 0] = -1 # needed transformation for cosine
         s_target = s_target.type(torch.bool)
@@ -330,11 +333,10 @@ class ContrastiveWeighter(WeighingAlgo):
         losses["embedding_cosine_loss"] = nn.CosineEmbeddingLoss(margin = -1)(embedding_1, embedding_2, cos_target)
         with torch.no_grad():
             # how many embeddings are less than orthogonal?
-            true_positive = s_target * (torch.cosine_similarity(embedding_1, embedding_2) > 0)
-            true_negative = (~s_target) * (torch.cosine_similarity(embedding_1, embedding_2) < 0)
-            true_positive = true_positive.float().mean()
-            true_negative = true_negative.float().mean()
-            # print(true_positive, true_negative)
+            positive_pred = (torch.cosine_similarity(embedding_1, embedding_2) > 0).float()
+            accuracy = (positive_pred == s_target).float().mean()
+            true_positive = accuracy
+            true_negative = 1 - accuracy
         return losses, true_positive, true_negative
 
 
