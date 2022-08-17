@@ -144,6 +144,8 @@ def rollout(policy, env, horizon, render=False, video_writer=None, video_skip=5,
                 #       This includes operations like channel swapping and float to uint8 conversion
                 #       for saving disk space.
                 traj["obs"].append(ObsUtils.unprocess_obs_dict(obs))
+                import ipdb
+                ipdb.set_trace()
                 traj["next_obs"].append(ObsUtils.unprocess_obs_dict(next_obs))
 
             # break if done or if success

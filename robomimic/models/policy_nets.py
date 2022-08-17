@@ -849,6 +849,7 @@ class RNNGMMActorNetwork(RNNActorNetwork):
             mod = list(obs_dict.keys())[0]
             goal_dict = TensorUtils.unsqueeze_expand_at(goal_dict, size=obs_dict[mod].shape[1], dim=1)
 
+
         outputs = RNN_MIMO_MLP.forward(
             self, obs=obs_dict, goal=goal_dict, rnn_init_state=rnn_init_state, return_state=return_state)
 

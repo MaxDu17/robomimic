@@ -406,6 +406,7 @@ def unprocess_obs(obs, obs_modality=None, obs_key=None):
     assert obs_modality is not None or obs_key is not None, "Either obs_modality or obs_key must be specified!"
     if obs_key is not None:
         obs_modality = OBS_KEYS_TO_MODALITIES[obs_key]
+
     return OBS_MODALITY_CLASSES[obs_modality].unprocess_obs(obs)
 
 
@@ -889,7 +890,8 @@ class ImageModality(Modality):
             unprocessed_obs (np.array or torch.Tensor): image passed through
                 inverse operation of @process_frame
         """
-        return TU.to_uint8(unprocess_frame(frame=obs, channel_dim=3, scale=255.))
+        x =  unprocess_frame(frame=obs, channel_dim=3, scale=255.)
+        return TU.to_uint8(x)
 
 
 class DepthModality(Modality):

@@ -22,6 +22,7 @@ import robomimic.utils.log_utils as LogUtils
 
 from robomimic.utils.dataset import SequenceDataset
 from robomimic.utils.classifier_dataset import ClassifierDataset
+from robomimic.utils.soft_classifier_dataset import SoftClassifierDataset
 from robomimic.envs.env_base import EnvBase
 from robomimic.algo import RolloutPolicy
 
@@ -54,14 +55,14 @@ def get_exp_dir(config, auto_remove_exp_dir=False):
         # relative paths are specified relative to robomimic module location
         base_output_dir = os.path.join(robomimic.__path__[0], base_output_dir)
     base_output_dir = os.path.join(base_output_dir, config.experiment.name)
-    if os.path.exists(base_output_dir):
+    if os.path.exists(f"{base_output_dir}/{time_str}"):
         if not auto_remove_exp_dir:
-            ans = input("WARNING: model directory ({}) already exists! \noverwrite? (y/n)\n".format(base_output_dir))
+            ans = input("WARNING: model directory ({}) already exists! \noverwrite? (y/n)\n".format(f"{base_output_dir}/{time_str}"))
         else:
             ans = "y"
         if ans == "y":
             print("REMOVING")
-            shutil.rmtree(base_output_dir)
+            shutil.rmtree(f"{base_output_dir}/{time_str}")
 
     # only make model directory if model saving is enabled
     output_dir = None
@@ -177,6 +178,9 @@ def dataset_factory(config, obs_keys, filter_by_attribute=None, dataset_path=Non
     if modifications == "classifier":
         ds_kwargs["radius"] = config.train.radius
         dataset = ClassifierDataset(**ds_kwargs)
+    elif modifications == "soft_classifier":
+        ds_kwargs["alpha"] = config.train.alpha
+        dataset = SoftClassifierDataset(**ds_kwargs)
     else:
         dataset = SequenceDataset(**ds_kwargs)
 
@@ -223,6 +227,12 @@ def run_rollout(
     policy.start_episode()
 
     ob_dict = env.reset()
+
+    state_dict = env.get_state()
+
+    # hack that is necessary for robosuite tasks for deterministic action playback
+    obs_dict = env.reset_to(state_dict)
+
     goal_dict = None
     if use_goals:
         # retrieve goal from the environment
@@ -233,15 +243,18 @@ def run_rollout(
 
     total_reward = 0.
     success = { k: False for k in env.is_success() } # success metrics
-
+    import time
     try:
         for step_i in range(horizon):
 
             # get action from policy
+
+            beg = time.time()
             ac = policy(ob=ob_dict, goal=goal_dict)
 
             # play action
             ob_dict, r, done, _ = env.step(ac)
+            # print(time.time() - beg)
 
             # render to screen
             if render:
@@ -257,7 +270,7 @@ def run_rollout(
             # visualization
             if video_writer is not None:
                 if video_count % video_skip == 0:
-                    video_img = env.render(mode="rgb_array", height=512, width=512)
+                    video_img = env.render(mode="rgb_array", height=256, width=256)
                     video_writer.append_data(video_img)
 
                 video_count += 1
@@ -292,6 +305,7 @@ def rollout_with_stats(
         video_path=None,
         epoch=None,
         video_skip=5,
+        record_first = False,
         terminate_on_success=False,
         verbose=False,
     ):
@@ -377,7 +391,7 @@ def rollout_with_stats(
                 horizon=horizon,
                 render=render,
                 use_goals=use_goals,
-                video_writer=env_video_writer,
+                video_writer=env_video_writer if not record_first or ep_i == 0 else None,
                 video_skip=video_skip,
                 terminate_on_success=terminate_on_success,
             )
@@ -604,6 +618,7 @@ def run_epoch(model, data_loader,epoch, validate=False, num_steps=None, second_d
         # process batch for training
         t = time.time()
         input_batch = model.process_batch_for_training(batch)
+
         timing_stats["Process_Batch"].append(time.time() - t)
 
         # forward and backward pass

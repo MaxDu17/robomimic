@@ -345,6 +345,7 @@ def policy_from_checkpoint(device=None, ckpt_path=None, ckpt_dict=None, verbose=
         with config.values_unlocked():
             config.algo.optim_params.policy.learning_rate.initial = learning_rate
     # read config to set up metadata for observation modalities (e.g. detecting rgb observations)
+
     ObsUtils.initialize_obs_utils_with_config(config)
 
     # shape meta from model dict to get info needed to create model

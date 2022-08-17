@@ -174,7 +174,6 @@ class SequenceDataset(torch.utils.data.Dataset):
                 filter key) are used.
         """
         # filter demo trajectory by mask
-
         if demos is not None:
             self.demos = demos
         elif filter_by_attribute is not None:
@@ -800,8 +799,8 @@ class SequenceDataset(torch.utils.data.Dataset):
         """
         if self.weighting:
             print("WEIGHTING SAMPLER")
-            return torch.utils.data.sampler.WeightedRandomSampler(list(self._weight_list.values()), self.total_num_sequences)  # if we are weighting
-        return None
+        return torch.utils.data.sampler.WeightedRandomSampler(list(self._weight_list.values()), self.total_num_sequences, replacement = True)  # if we are weighting
+        # return None
 
     def get_weight_list(self):
         return list(self._weight_list.values())

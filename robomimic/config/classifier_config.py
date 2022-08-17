@@ -11,6 +11,8 @@ class WeightConfig(BaseConfig):
     def train_config(self):
         super().train_config()
         self.train.radius = 3
+        self.train.alpha = 6
+        self.train.mode = "classifier"
         
     def algo_config(self):
         """

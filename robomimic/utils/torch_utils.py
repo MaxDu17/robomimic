@@ -177,6 +177,8 @@ def backprop_for_loss(net, optim, loss, max_grad_norm=None, retain_graph=False):
 
     # step
     optim.step()
+    # import ipdb
+    # ipdb.set_trace()
 
     return grad_norms
 

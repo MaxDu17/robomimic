@@ -169,6 +169,10 @@ class EnvRobosuite(EB.EnvBase):
         else:
             raise NotImplementedError("mode={} is not implemented".format(mode))
 
+    # use this to get any sort of information that you need to get a demostration working 
+    def get_priv_info(self):
+        return self.env.get_priv_info()
+
     def get_observation(self, di=None):
         """
         Get current environment observation dictionary.
