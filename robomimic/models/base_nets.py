@@ -477,6 +477,15 @@ class ResNet18Conv(ConvBase):
         self._input_channel = input_channel
         self.nets = torch.nn.Sequential(*(list(net.children())[:-2]))
 
+    def load_weights(self, pretrained_weights = None, lock_encoder = False):
+        assert not lock_encoder or pretrained_weights is not None, "you can't lock an untrained encoder!"
+        if pretrained_weights is not None:
+            net.load_state_dict(torch.load(pretrained_weights))
+        if lock_encoder:
+            for param in self.net.parameters():
+                param.requires_grad = False
+
+
     def output_shape(self, input_shape):
         """
         Function to compute output shape from inputs to this module.
@@ -1019,6 +1028,9 @@ class VisualCore(EncoderCore, ConvBase):
             net_list.append(linear)
 
         self.nets = nn.Sequential(*net_list)
+
+    def load_weights(self, pretrained_weights = None, lock_encoder = None):
+        self.backbone.load_weights(pretrained_weights = pretrained_weights, lock_encoder = lock_encoder)
 
     def output_shape(self, input_shape):
         """

@@ -222,6 +222,8 @@ class ContrastiveWeighter(WeighingAlgo):
             layer_dims=self.algo_config.actor_layer_dims,
             output_shapes = OrderedDict(value = (self.algo_config.embedding_size, )),
             encoder_kwargs=ObsUtils.obs_encoder_kwargs_from_config(self.obs_config.encoder),
+            pretrained_weights=self.algo_config.pretrained_weights,
+            lock=self.algo_config.lock_encoder
         )
         self.nets = self.nets.float().to(self.device)
 
@@ -390,4 +392,4 @@ class ContrastiveWeighter(WeighingAlgo):
         assert not self.nets.training
         embedding_1 = self.nets["policy"](obs=batch_1["obs"])
         embedding_2 = self.nets["policy"](obs=batch_2["obs"])
-        return torch.cosine_similarity(embedding_1["value"], embedding_2["value"], dim)
+        return 0.5 * (torch.cosine_similarity(embedding_1["value"], embedding_2["value"], dim) + 1)

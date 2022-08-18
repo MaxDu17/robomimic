@@ -29,11 +29,15 @@ def obs_encoder_factory(
         obs_shapes,
         feature_activation=nn.ReLU,
         encoder_kwargs=None,
+        pretrained_weights = None,
+        lock = None
     ):
     """
     Utility function to create an @ObservationEncoder from kwargs specified in config.
 
     Args:
+        pretrained_weights (dict): if provided, this allows for the encoder to be loaded from a file
+        lock (dict): if True, we will lock the encoder
         obs_shapes (OrderedDict): a dictionary that maps observation key to
             expected shapes for observations.
 
@@ -71,6 +75,7 @@ def obs_encoder_factory(
             # Add in input shape info
             enc_kwargs[f"{obs_module}_kwargs"]["input_shape"] = obs_shape
             # If group class is specified, then make sure corresponding kwargs only contain relevant kwargs
+
             if enc_kwargs[f"{obs_module}_class"] is not None:
                 enc_kwargs[f"{obs_module}_kwargs"] = extract_class_init_kwargs_from_dict(
                     cls=cls_mapping[enc_kwargs[f"{obs_module}_class"]],
@@ -82,12 +87,15 @@ def obs_encoder_factory(
         randomizer = None if enc_kwargs["obs_randomizer_class"] is None else \
             ObsUtils.OBS_RANDOMIZERS[enc_kwargs["obs_randomizer_class"]](**enc_kwargs["obs_randomizer_kwargs"])
 
+
         enc.register_obs_key(
             name=k,
             shape=obs_shape,
             net_class=enc_kwargs["core_class"],
             net_kwargs=enc_kwargs["core_kwargs"],
             randomizer=randomizer,
+            load_net_from = pretrained_weights.get(k, None) if pretrained_weights is not None else None,
+            load_and_lock = lock.get(k, None) if lock is not None else None
         )
 
     enc.make()
@@ -114,6 +122,10 @@ class ObservationEncoder(Module):
         self.obs_share_mods = OrderedDict()
         self.obs_nets = nn.ModuleDict()
         self.obs_randomizers = nn.ModuleDict()
+
+        self.pretrained_models = OrderedDict()
+        self.pretrained_models_lock = OrderedDict()
+
         self.feature_activation = feature_activation
         self._locked = False
 
@@ -126,6 +138,8 @@ class ObservationEncoder(Module):
         net=None,
         randomizer=None,
         share_net_from=None,
+        load_net_from = None,
+        load_and_lock = False,
     ):
         """
         Register an observation key that this encoder should be responsible for.
@@ -144,6 +158,8 @@ class ObservationEncoder(Module):
             share_net_from (str): if provided, use the same instance of @net_class
                 as another observation key. This observation key must already exist in this encoder.
                 Warning: Note that this does not share the observation key randomizer
+            load_net_from (str): if provided, load the network from a pretrained file
+            load_and_lock (bool): if True, locks the encoder
         """
         assert not self._locked, "ObservationEncoder: @register_obs_key called after @make"
         assert name not in self.obs_shapes, "ObservationEncoder: modality {} already exists".format(name)
@@ -171,6 +187,8 @@ class ObservationEncoder(Module):
         self.obs_nets[name] = net
         self.obs_randomizers[name] = randomizer
         self.obs_share_mods[name] = share_net_from
+        self.pretrained_models[name] = load_net_from
+        self.pretrained_models_lock[name] = load_and_lock
 
     def make(self):
         """
@@ -192,6 +210,9 @@ class ObservationEncoder(Module):
             elif self.obs_share_mods[k] is not None:
                 # make sure net is shared with another modality
                 self.obs_nets[k] = self.obs_nets[self.obs_share_mods[k]]
+
+            if self.pretrained_models[k] is not None:
+                self.obs_nets[k].load_weights(pretrained_weights = self.pretrained_models[k], lock_encoder = self.pretrained_models_lock[k])
 
         self.activation = None
         if self.feature_activation is not None:
@@ -368,6 +389,8 @@ class ObservationGroupEncoder(Module):
         observation_group_shapes,
         feature_activation=nn.ReLU,
         encoder_kwargs=None,
+        pretrained_weights = None,
+        lock = None
     ):
         """
         Args:
@@ -411,6 +434,8 @@ class ObservationGroupEncoder(Module):
                 obs_shapes=self.observation_group_shapes[obs_group],
                 feature_activation=feature_activation,
                 encoder_kwargs=encoder_kwargs,
+                pretrained_weights=pretrained_weights.get(obs_group, None) if pretrained_weights is not None else None,
+                lock=lock.get(obs_group, None) if lock is not None else None
             )
 
     def forward(self, **inputs):
@@ -486,6 +511,8 @@ class MIMO_MLP(Module):
         layer_func=nn.Linear,
         activation=nn.ReLU,
         encoder_kwargs=None,
+        pretrained_weights=None,
+        lock=None
     ):
         """
         Args:
@@ -535,6 +562,8 @@ class MIMO_MLP(Module):
         self.nets["encoder"] = ObservationGroupEncoder(
             observation_group_shapes=input_obs_group_shapes,
             encoder_kwargs=encoder_kwargs,
+            pretrained_weights=pretrained_weights,
+            lock=lock
         )
 
         # flat encoder output dimension
@@ -623,6 +652,8 @@ class RNN_MIMO_MLP(Module):
         mlp_layer_func=nn.Linear,
         per_step=True,
         encoder_kwargs=None,
+        pretrained_weights=None,
+        lock=None
     ):
         """
         Args:
@@ -662,6 +693,8 @@ class RNN_MIMO_MLP(Module):
                         ...
                 obs_modality2: dict
                     ...
+            pretrained_weights (dict): a dictionary of weight files, for use in preloading weights
+            lock (dict): a boolean dictionary that enables/disables training of encoder weights
         """
         super(RNN_MIMO_MLP, self).__init__()
         assert isinstance(input_obs_group_shapes, OrderedDict)
@@ -677,7 +710,11 @@ class RNN_MIMO_MLP(Module):
         self.nets["encoder"] = ObservationGroupEncoder(
             observation_group_shapes=input_obs_group_shapes,
             encoder_kwargs=encoder_kwargs,
+            pretrained_weights = pretrained_weights,
+            lock = lock
         )
+
+
 
         # flat encoder output dimension
         rnn_input_dim = self.nets["encoder"].output_shape()[0]
