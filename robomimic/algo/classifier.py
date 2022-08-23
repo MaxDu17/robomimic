@@ -40,7 +40,6 @@ class VanillaWeighter(WeighingAlgo):
         super().__init__(**kwargs)
         self.loss = nn.BCELoss()
 
-        #TODO: enable shuffling for different-traj
 
     def _create_networks(self):
         """
@@ -113,7 +112,8 @@ class VanillaWeighter(WeighingAlgo):
         return info
 
     def _shuffle(self, batch):
-        batch_size = batch["anchor"]["object"].shape[0]
+        batch_size = batch["anchor"][list(batch["anchor"].keys())[0]].shape[0]
+        print(batch_size)
         permutation = torch.randperm(batch_size)
         batch["negative"] = {key : value[permutation] for key, value in batch["negative"].items()}
 
@@ -262,6 +262,7 @@ class ContrastiveWeighter(WeighingAlgo):
             # lock=self.algo_config.lock_encoder
         )
         self.nets = self.nets.float().to(self.device)
+        self.loss = nn.CosineEmbeddingLoss(margin = -1)
 
     def process_batch_for_training(self, batch):
         """
@@ -276,15 +277,21 @@ class ContrastiveWeighter(WeighingAlgo):
             input_batch (dict): processed and filtered batch that
                 will be used for training
         """
-        input_batch_1 = dict()
-        input_batch_2 = dict()
-        input_batch_1["obs"] = {k: batch["obs_1"][k][:, 0, :] for k in batch["obs_1"]}
-        input_batch_2["obs"] = {k: batch["obs_2"][k][:, 0, :] for k in batch["obs_2"]}
-        labels = batch["label"]
+        input_batch = dict()
+        input_batch["anchor"] = {k: batch["anchor"][k][:, 0, :] for k in batch["anchor"]}
+        input_batch["positive"] = {k: batch["positive"][k][:, 0, :] for k in batch["positive"]}
+        input_batch["negative"] = {k: batch["negative"][k][:, 0, :] for k in batch["negative"]}
 
-        return (TensorUtils.to_device(TensorUtils.to_float(input_batch_1), self.device),
-               TensorUtils.to_device(TensorUtils.to_float(input_batch_2), self.device),
-               TensorUtils.to_device(TensorUtils.to_float(labels), self.device))
+        return TensorUtils.to_device(TensorUtils.to_float(input_batch), self.device)
+        # input_batch_1 = dict()
+        # input_batch_2 = dict()
+        # input_batch_1["obs"] = {k: batch["obs_1"][k][:, 0, :] for k in batch["obs_1"]}
+        # input_batch_2["obs"] = {k: batch["obs_2"][k][:, 0, :] for k in batch["obs_2"]}
+        # labels = batch["label"]
+        #
+        # return (TensorUtils.to_device(TensorUtils.to_float(input_batch_1), self.device),
+        #        TensorUtils.to_device(TensorUtils.to_float(input_batch_2), self.device),
+        #        TensorUtils.to_device(TensorUtils.to_float(labels), self.device))
 
 
     def train_on_batch(self, batch, epoch, validate=False):
@@ -304,19 +311,19 @@ class ContrastiveWeighter(WeighingAlgo):
             info (dict): dictionary of relevant inputs, outputs, and losses
                 that might be relevant for logging
         """
-        batch_1, batch_2, labels = batch # different batch strcutrue
+
+        # batch_1, batch_2, labels = batch # different batch strcutrue
 
         with TorchUtils.maybe_no_grad(no_grad=validate):
             # this just gets an empty dictionary
             info = super(ContrastiveWeighter, self).train_on_batch(batch_1, epoch, validate=validate)
             
-            predictions = self._forward_training(batch_1, batch_2)
+            embeddings = self._forward_training(batch)
 
-            losses, true_positive, true_negative = self._compute_losses(predictions, labels)
-            info["true_positive"] = TensorUtils.detach(true_positive)
-            info["true_negative"] = TensorUtils.detach(true_negative)
+            losses, accuracy = self._compute_losses(embeddings)
+            info["accuracy"] = TensorUtils.detach(accuracy)
 
-            info["predictions"] = TensorUtils.detach(predictions)
+            # info["predictions"] = TensorUtils.detach(predictions)
             info["losses"] = TensorUtils.detach(losses)
 
             if not validate:
@@ -325,7 +332,7 @@ class ContrastiveWeighter(WeighingAlgo):
 
         return info
 
-    def _forward_training(self, batch_1, batch_2):
+    def _forward_training(self, batch):
         """
         Internal helper function for weighting algo class. Compute forward pass
         and return network outputs in @predictions dict.
@@ -338,15 +345,17 @@ class ContrastiveWeighter(WeighingAlgo):
             predictions (dict): dictionary containing network outputs
         """
         predictions = OrderedDict()
-        embedding_1 = self.nets["policy"](obs=batch_1["obs"])
-        embedding_2 = self.nets["policy"](obs=batch_2["obs"])
+        anchor_embedding = self.nets["policy"](obs=batch["anchor"])
+        positive_embedding = self.nets["policy"](obs=batch["positive"])
+        negative_embedding = self.nets["policy"](obs=batch["negative"])
 
 
-        predictions["embedding_1"] = embedding_1
-        predictions["embedding_2"] = embedding_2
+        predictions["positive_embedding"] = positive_embedding["value"]
+        predictions["negative_embedding"] = negative_embedding["value"]
+        predictions["anchor_embedding"] = anchor_embedding["value"]
         return predictions
 
-    def _compute_losses(self, predictions, labels):
+    def _compute_losses(self, embeddings):
         """
         Internal helper function for weighting algo class. Compute losses based on
         network outputs in @predictions dict, using reference labels in @batch.
@@ -360,22 +369,34 @@ class ContrastiveWeighter(WeighingAlgo):
             losses (dict): dictionary of losses computed over the batch
         """
         losses = OrderedDict()
+        batch_size = predictions["anchor_embedding"].shape[0]
 
-        s_target = labels
-        cos_target = deepcopy(s_target)
-        cos_target[s_target == 0] = -1 # needed transformation for cosine
-        s_target = s_target.type(torch.bool)
+        pos_cos_target = torch.ones_like(embeddings["anchor_embedding"])
+        neg_cos_target = -1 * torch.ones_like(embeddings["anchor_embedding"])
 
-        embedding_1, embedding_2 = predictions["embedding_1"]["value"], predictions["embedding_2"]["value"]
-        # force -1 and 1 labels
-        losses["embedding_cosine_loss"] = nn.CosineEmbeddingLoss(margin = -1)(embedding_1, embedding_2, cos_target)
+        losses["pos"] = self.loss(predictions["anchor_embedding"], predictions["positive_embedding"], pos_cos_target)
+        losses["neg"] = self.loss(predictions["anchor_embedding"], predictions["negative_embedding"], neg_cos_target)
+
+        shuffled_negative_embedding = predictions["negative_embedding"][torch.randperm(batch_size)]
+        import ipdb
+        ipdb.set_trace()
+        losses["diff"] = self.loss(predictions["anchor_embedding"], shuffled_negative_embedding, neg_cos_target)
+
+        accuracy = OrderedDict()
         with torch.no_grad():
-            # how many embeddings are less than orthogonal?
-            positive_pred = (torch.cosine_similarity(embedding_1, embedding_2) > 0).float()
-            accuracy = (positive_pred == s_target).float().mean()
-            true_positive = accuracy
-            true_negative = 1 - accuracy
-        return losses, true_positive, true_negative
+            positive_pred = (torch.cosine_similarity(predictions["anchor_embedding"],
+                                                     predictions["positive_embedding"]) > 0).float()
+            accuracy["pos"] = (positive_pred == pos_cos_target).float().mean()
+
+            negative_pred = (torch.cosine_similarity(predictions["anchor_embedding"],
+                                                     predictions["negative_embedding"]) < 0).float()
+            accuracy["neg"] = (negative_pred == neg_cos_target).float().mean()
+
+            diff_pred = (torch.cosine_similarity(predictions["anchor_embedding"],
+                                                     shuffledD_negative_embedding) < 0).float()
+            accuracy["diff"] = (diff_pred == neg_cos_target).float().mean()
+
+        return losses, accuracy
 
 
     def _train_step(self, losses):
@@ -392,7 +413,7 @@ class ContrastiveWeighter(WeighingAlgo):
         policy_grad_norms = TorchUtils.backprop_for_loss(
             net=self.nets["policy"],
             optim=self.optimizers["policy"],
-            loss=losses["embedding_cosine_loss"],
+            loss=losses["neg"] + losses["pos"] + losses["diff"],
         )
         info["policy_grad_norms"] = policy_grad_norms
         return info
@@ -409,11 +430,13 @@ class ContrastiveWeighter(WeighingAlgo):
             loss_log (dict): name -> summary statistic
         """
         log = super(ContrastiveWeighter, self).log_info(info)
-        log["Loss"] = info["losses"]["embedding_cosine_loss"].item()
-        if "true_positive" in info:
-            log["true_positive"] = info["true_positive"].item()
-        if "true_negative" in info:
-            log["true_negative"] = info["true_negative"].item()
+        log["pos_loss"] = not info["losses"]["pos"].item()
+        log["neg_loss"] = not info["losses"]["neg"].item()
+        log["diff_loss"] = not info["losses"]["diff"].item()
+        log["pos_accuracy"] = not info["accuracy"]["pos"].item()
+        log["neg_accuracy"] = not info["accuracy"]["neg"].item()
+        log["diff_accuracy"] = not info["accuracy"]["diff"].item()
+
         if "policy_grad_norms" in info:
             log["Policy_Grad_Norms"] = info["policy_grad_norms"]
         return log
