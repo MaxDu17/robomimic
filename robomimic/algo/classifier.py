@@ -40,6 +40,8 @@ class VanillaWeighter(WeighingAlgo):
         super().__init__(**kwargs)
         self.loss = nn.BCELoss()
 
+        #TODO: enable shuffling for different-traj
+
     def _create_networks(self):
         """
         Creates networks and places them into @self.nets.
@@ -70,9 +72,9 @@ class VanillaWeighter(WeighingAlgo):
                 will be used for training
         """
         input_batch = dict()
-        input_batch["obs_1"] = {k: batch["obs_1"][k][:, 0, :] for k in batch["obs_1"]}
-        input_batch["obs_2"] = {k: batch["obs_2"][k][:, 0, :] for k in batch["obs_2"]}
-        input_batch["label"] = batch["label"]
+        input_batch["anchor"] = {k: batch["anchor"][k][:, 0, :] for k in batch["anchor"]}
+        input_batch["positive"] = {k: batch["positive"][k][:, 0, :] for k in batch["positive"]}
+        input_batch["negative"] = {k: batch["negative"][k][:, 0, :] for k in batch["negative"]}
 
         return TensorUtils.to_device(TensorUtils.to_float(input_batch), self.device)
 
@@ -97,10 +99,11 @@ class VanillaWeighter(WeighingAlgo):
         with TorchUtils.maybe_no_grad(no_grad=validate):
             info = super(VanillaWeighter, self).train_on_batch(batch, epoch, validate=validate)
             predictions = self._forward_training(batch)
-            labels = batch["label"]
-            losses, accuracy = self._compute_losses(predictions, labels)
+
+            losses, accuracy = self._compute_losses(predictions)
             info["accuracy"] = TensorUtils.detach(accuracy)
 
+            # NOT DONE
             info["predictions"] = TensorUtils.detach(predictions)
             info["losses"] = TensorUtils.detach(losses)
             if not validate:
@@ -123,11 +126,15 @@ class VanillaWeighter(WeighingAlgo):
         """
         predictions = OrderedDict()
 
-        weights = self.nets["policy"](obs_dict_1=batch["obs_1"], obs_dict_2 = batch["obs_2"])
-        predictions["label"] = weights
+        pos_weights = self.nets["policy"](obs_dict_1=batch["anchor"], obs_dict_2 = batch["positive"])
+        neg_weights = self.nets["policy"](obs_dict_1=batch["anchor"], obs_dict_2 = batch["negative"])
+
+        #TODO: implement other-trajectory shuffling
+        predictions["pos"] = pos_weights
+        predictions["neg"] = neg_weights
         return predictions
 
-    def _compute_losses(self, predictions, labels):
+    def _compute_losses(self, predictions):
         """
         Internal helper function for weighting algo class. Compute losses based on
         network outputs in @predictions dict, using reference labels in @batch.
@@ -140,13 +147,23 @@ class VanillaWeighter(WeighingAlgo):
         Returns:
             losses (dict): dictionary of losses computed over the batch
         """
+
         losses = OrderedDict()
-        s_target = torch.unsqueeze(labels, dim = 1) #to match shapes
-        similarity = predictions["label"]
-        losses["BCE_loss"] = self.loss(similarity, s_target)
+        pos_target = torch.ones_like(predictions["pos"])
+        neg_target = torch.zeros_like(predictions["neg"])
+
+        losses["pos_loss"] = self.loss(predictions["pos"], pos_target)
+        losses["neg_loss"] = self.loss(predictions["neg"], neg_target)
+
+        #TODO: different-episode losses
+
+        accuracy = OrderedDict()
         with torch.no_grad():
-            hard_labels = (similarity > 0.5).float()
-            accuracy = (hard_labels == s_target).float().sum()
+            hard_labels_pos = (predictions["pos"] > 0.5).float()
+            accuracy["pos"] = (hard_labels_pos == pos_target).float().mean()
+
+            hard_labels_neg = (predictions["neg"] > 0.5).float()
+            accuracy["neg"] = (hard_labels_neg == neg_target).float().mean()
         return losses, accuracy
 
 
@@ -164,7 +181,7 @@ class VanillaWeighter(WeighingAlgo):
         policy_grad_norms = TorchUtils.backprop_for_loss(
             net=self.nets["policy"],
             optim=self.optimizers["policy"],
-            loss=losses["BCE_loss"],
+            loss=losses["pos_loss"] + losses["neg_loss"],
         )
         info["policy_grad_norms"] = policy_grad_norms
         return info
@@ -181,9 +198,12 @@ class VanillaWeighter(WeighingAlgo):
             loss_log (dict): name -> summary statistic
         """
         log = super(VanillaWeighter, self).log_info(info)
-        log["Loss"] = info["losses"]["BCE_loss"].item()
+        log["pos_loss"] = info["losses"]["pos_loss"].item()
+        log["neg_loss"] = info["losses"]["neg_loss"].item()
+
         if "accuracy" in info:
-            log["accuracy"] = info["accuracy"].item()
+            log["pos_accuracy"] = info["accuracy"]["pos"].item()
+            log["neg_accuracy"] = info["accuracy"]["neg"].item()
         if "policy_grad_norms" in info:
             log["Policy_Grad_Norms"] = info["policy_grad_norms"]
         return log
