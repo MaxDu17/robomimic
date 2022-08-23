@@ -68,10 +68,8 @@ class ClassifierDataset(SequenceDataset):
         """
         assert self.hdf5_cache_mode == "low_dim", "highdim not yet implemented on the classifier dataset"
         #varying positions
-        offset = np.random.randint(self.radius)
 
         demo_id = self._index_to_demo_id[index]
-        second_demo_id = demo_id
 
         #picking between the demos
         demo_start_index = self._demo_id_to_start_indices[demo_id]

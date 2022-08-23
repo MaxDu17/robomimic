@@ -112,6 +112,11 @@ class VanillaWeighter(WeighingAlgo):
 
         return info
 
+    def _shuffle(self, batch):
+        batch_size = batch["anchor"]["object"].shape[0]
+        permutation = torch.randperm(batch_size)
+        batch["negative"] = {key : value[permutation] for key, value in batch["negative"].items()}
+
     def _forward_training(self, batch):
         """
         Internal helper function for weighting algo class. Compute forward pass
@@ -128,10 +133,14 @@ class VanillaWeighter(WeighingAlgo):
 
         pos_weights = self.nets["policy"](obs_dict_1=batch["anchor"], obs_dict_2 = batch["positive"])
         neg_weights = self.nets["policy"](obs_dict_1=batch["anchor"], obs_dict_2 = batch["negative"])
+        self._shuffle(batch)
+        diff_traj_weights = self.nets["policy"](obs_dict_1=batch["anchor"], obs_dict_2 = batch["negative"])
+
 
         #TODO: implement other-trajectory shuffling
         predictions["pos"] = pos_weights
         predictions["neg"] = neg_weights
+        predictions["diff"] = diff_traj_weights
         return predictions
 
     def _compute_losses(self, predictions):
@@ -154,6 +163,7 @@ class VanillaWeighter(WeighingAlgo):
 
         losses["pos_loss"] = self.loss(predictions["pos"], pos_target)
         losses["neg_loss"] = self.loss(predictions["neg"], neg_target)
+        losses["diff_loss"] = self.loss(predictions["diff"], neg_target)
 
         #TODO: different-episode losses
 
@@ -164,6 +174,9 @@ class VanillaWeighter(WeighingAlgo):
 
             hard_labels_neg = (predictions["neg"] > 0.5).float()
             accuracy["neg"] = (hard_labels_neg == neg_target).float().mean()
+
+            hard_labels_neg = (predictions["diff"] > 0.5).float()
+            accuracy["diff"] = (hard_labels_neg == neg_target).float().mean()
         return losses, accuracy
 
 
@@ -181,7 +194,7 @@ class VanillaWeighter(WeighingAlgo):
         policy_grad_norms = TorchUtils.backprop_for_loss(
             net=self.nets["policy"],
             optim=self.optimizers["policy"],
-            loss=losses["pos_loss"] + losses["neg_loss"],
+            loss=losses["pos_loss"] + losses["neg_loss"] + losses["diff_loss"],
         )
         info["policy_grad_norms"] = policy_grad_norms
         return info
@@ -200,10 +213,12 @@ class VanillaWeighter(WeighingAlgo):
         log = super(VanillaWeighter, self).log_info(info)
         log["pos_loss"] = info["losses"]["pos_loss"].item()
         log["neg_loss"] = info["losses"]["neg_loss"].item()
+        log["diff_loss"] = info["losses"]["diff_loss"].item()
 
         if "accuracy" in info:
             log["pos_accuracy"] = info["accuracy"]["pos"].item()
             log["neg_accuracy"] = info["accuracy"]["neg"].item()
+            log["diff_accuracy"] = info["accuracy"]["diff"].item()
         if "policy_grad_norms" in info:
             log["Policy_Grad_Norms"] = info["policy_grad_norms"]
         return log
