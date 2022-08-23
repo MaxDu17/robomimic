@@ -97,7 +97,7 @@ class VanillaWeighter(WeighingAlgo):
         with TorchUtils.maybe_no_grad(no_grad=validate):
             info = super(VanillaWeighter, self).train_on_batch(batch, epoch, validate=validate)
             predictions = self._forward_training(batch)
-
+            labels = batch["label"]
             losses, accuracy = self._compute_losses(predictions, labels)
             info["accuracy"] = TensorUtils.detach(accuracy)
 
@@ -127,7 +127,7 @@ class VanillaWeighter(WeighingAlgo):
         predictions["label"] = weights
         return predictions
 
-    def _compute_losses(self, predictions, batch):
+    def _compute_losses(self, predictions, labels):
         """
         Internal helper function for weighting algo class. Compute losses based on
         network outputs in @predictions dict, using reference labels in @batch.
@@ -141,7 +141,7 @@ class VanillaWeighter(WeighingAlgo):
             losses (dict): dictionary of losses computed over the batch
         """
         losses = OrderedDict()
-        s_target = torch.unsqueeze(batch["label"], dim = 1) #to match shapes
+        s_target = torch.unsqueeze(labels, dim = 1) #to match shapes
         similarity = predictions["label"]
         losses["BCE_loss"] = self.loss(similarity, s_target)
         with torch.no_grad():
@@ -217,13 +217,14 @@ class ContrastiveWeighter(WeighingAlgo):
         self.nets = nn.ModuleDict()
         observation_group_shapes = OrderedDict()
         observation_group_shapes["obs"] = OrderedDict(self.obs_shapes)
+
         self.nets["policy"] = MIMO_MLP(
             input_obs_group_shapes=observation_group_shapes,
             layer_dims=self.algo_config.actor_layer_dims,
             output_shapes = OrderedDict(value = (self.algo_config.embedding_size, )),
             encoder_kwargs=ObsUtils.obs_encoder_kwargs_from_config(self.obs_config.encoder),
-            pretrained_weights=self.algo_config.pretrained_weights,
-            lock=self.algo_config.lock_encoder
+            # pretrained_weights=self.algo_config.pretrained_weights,
+            # lock=self.algo_config.lock_encoder
         )
         self.nets = self.nets.float().to(self.device)
 
@@ -390,6 +391,6 @@ class ContrastiveWeighter(WeighingAlgo):
         :return:
         """
         assert not self.nets.training
-        embedding_1 = self.nets["policy"](obs=batch_1["obs"])
-        embedding_2 = self.nets["policy"](obs=batch_2["obs"])
+        embedding_1 = self.nets["policy"](obs=obs_dict_one["obs"])
+        embedding_2 = self.nets["policy"](obs=obs_dict_two["obs"])
         return 0.5 * (torch.cosine_similarity(embedding_1["value"], embedding_2["value"], dim) + 1)

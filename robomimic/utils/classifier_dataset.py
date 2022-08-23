@@ -36,7 +36,8 @@ class ClassifierDataset(SequenceDataset):
                  weighting=False,
                  num_samples=None,
                  radius = 15,
-                 use_actions = False):
+                 use_actions = False,
+                 same_traj = False):
         super(ClassifierDataset, self).__init__(
                  hdf5_path,
                  obs_keys,
@@ -59,6 +60,7 @@ class ClassifierDataset(SequenceDataset):
         
         self.radius = radius
         self.use_actions = use_actions
+        self.same_traj = same_traj
 
     # just overriding the sampling funcitonality
     def __getitem__(self, index):
@@ -71,6 +73,7 @@ class ClassifierDataset(SequenceDataset):
         offset = np.random.randint(self.radius)
 
         demo_id = self._index_to_demo_id[index]
+        second_demo_id = demo_id
 
         #picking between the demos
         demo_start_index = self._demo_id_to_start_indices[demo_id]
@@ -82,29 +85,28 @@ class ClassifierDataset(SequenceDataset):
         if same:
             # picking a second index within a radius region, call it "same"
             if index + offset >= demo_end_index:
-                second_index = index_in_demo - offset
+                second_index_in_demo = index_in_demo - offset
             elif index - offset < demo_start_index:
-                second_index = index_in_demo + offset
+                second_index_in_demo = index_in_demo + offset
             elif np.random.rand() < 0.5: #coin toss if we aren't at the edge
-                second_index = index_in_demo - offset
+                second_index_in_demo = index_in_demo - offset
             else:
-                second_index = index_in_demo + offset
+                second_index_in_demo = index_in_demo + offset
             # print(f"same second index: {second_index}, first index: {index_in_demo}")
         else:
-            # sampling outside of the radius regoin if not same
-            perturb = np.random.randint(self.radius, viable_sample_size - self.radius)
-            second_index = (index_in_demo + perturb) % viable_sample_size
-            # print(f"second index: {second_index}, first index: {index_in_demo}")
-
-        keys = list(self.dataset_keys)
+            if self.same_traj:
+                # sampling outside of the radius regoin if not same
+                perturb = np.random.randint(self.radius, viable_sample_size - self.radius)
+                second_index_in_demo = (index_in_demo + perturb) % viable_sample_size
+            else:
+                perturb = np.random.randint(self.radius, self.total_num_sequences - self.radius)
+                # basically we can select anything outside of the radius
+                new_index = (index + perturb) % self.total_num_sequences
+                second_demo_id = self._index_to_demo_id[new_index]
+                second_demo_start_index = self._demo_id_to_start_indices[second_demo_id]
+                second_index_in_demo = new_index - second_demo_start_index + demo_index_offset
 
         data = {}
-        # data = self.get_dataset_sequence_from_demo(
-        #     demo_id,
-        #     index_in_demo=index_in_demo,
-        #     keys=tuple(keys),
-        #     seq_length=self.seq_length
-        # )
 
         data["label"] = same
 
@@ -117,8 +119,8 @@ class ClassifierDataset(SequenceDataset):
             prefix="obs"
         )
         data["obs_2"] = self.get_obs_sequence_from_demo(
-            demo_id,
-            index_in_demo=second_index,
+            second_demo_id,
+            index_in_demo=second_index_in_demo,
             keys=self.obs_keys,
             num_frames_to_stack=self.n_frame_stack - 1,
             seq_length = 1,
@@ -135,8 +137,8 @@ class ClassifierDataset(SequenceDataset):
             )
             data["obs_1"].update(actions)
             actions, _ = self.get_sequence_from_demo(
-                demo_id,
-                index_in_demo=second_index,
+                second_demo_id,
+                index_in_demo=second_index_in_demo,
                 keys=["actions"],
                 num_frames_to_stack=0,  # don't frame stack for meta keys
                 seq_length=1,

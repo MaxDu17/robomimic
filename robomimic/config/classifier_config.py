@@ -14,6 +14,8 @@ class WeightConfig(BaseConfig):
         self.train.alpha = 6
         self.train.actions = False
         self.train.mode = "classifier"
+        self.train.same_traj = True
+
         
     def algo_config(self):
         """
@@ -36,6 +38,17 @@ class WeightConfig(BaseConfig):
 
         # MLP network architecture (layers after observation encoder and RNN, if present)
         self.algo.actor_layer_dims = (1024, 1024)
+
+        self.algo.pretrained_weights = {"obs":
+                                            {
+                                                "agentview_image": None,
+                                                "robot0_eye_in_hand_image": None
+                                            }}
+        self.algo.lock_encoder = {"obs":
+                                {
+                                    "agentview_image": False,
+                                    "robot0_eye_in_hand_image": False
+                                }}
 
         # stochastic Gaussian policy settings
         self.algo.gaussian.enabled = False              # whether to train a Gaussian policy
@@ -99,6 +112,7 @@ class WeightContrastiveConfig(BaseConfig):
         self.train.alpha = 6
         self.train.actions = False
         self.train.mode = "classifier"
+        self.train.same_traj = True
 
     def algo_config(self):
         """

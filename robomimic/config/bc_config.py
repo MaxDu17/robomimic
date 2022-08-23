@@ -27,6 +27,17 @@ class BCConfig(BaseConfig):
         self.algo.loss.l1_weight = 0.0      # L1 loss weight
         self.algo.loss.cos_weight = 0.0     # cosine loss weight
 
+        self.algo.pretrained_weights = {"obs":
+                                            {
+                                                "agentview_image": None,
+                                                "robot0_eye_in_hand_image": None
+                                            }}
+        self.algo.lock_encoder = {"obs":
+                                {
+                                    "agentview_image": False,
+                                    "robot0_eye_in_hand_image": False
+                                }}
+
         # MLP network architecture (layers after observation encoder and RNN, if present)
         self.algo.actor_layer_dims = (1024, 1024)
 

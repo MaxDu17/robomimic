@@ -480,9 +480,9 @@ class ResNet18Conv(ConvBase):
     def load_weights(self, pretrained_weights = None, lock_encoder = False):
         assert not lock_encoder or pretrained_weights is not None, "you can't lock an untrained encoder!"
         if pretrained_weights is not None:
-            net.load_state_dict(torch.load(pretrained_weights))
+            self.net.load_state_dict(torch.load(pretrained_weights))
         if lock_encoder:
-            for param in self.net.parameters():
+            for param in self.nets.parameters():
                 param.requires_grad = False
 
 
