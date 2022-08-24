@@ -85,8 +85,7 @@ class ClassifierDataset(SequenceDataset):
         perturb = np.random.randint(viable_sample_size - (upper_bound - lower_bound))
         negative_index_in_demo = (upper_bound + perturb) % viable_sample_size
 
-        # print(index_in_demo, positive_index_in_demo, negative_index_in_demo)
-
+        # print(abs(positive_index_in_demo - negative_index_in_demo))
         data = {}
         data["anchor"] = self.get_obs_sequence_from_demo(
             demo_id,

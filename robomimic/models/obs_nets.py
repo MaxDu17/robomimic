@@ -211,8 +211,8 @@ class ObservationEncoder(Module):
                 # make sure net is shared with another modality
                 self.obs_nets[k] = self.obs_nets[self.obs_share_mods[k]]
 
-            if self.pretrained_models[k] is not None:
-                self.obs_nets[k].load_weights(pretrained_weights = self.pretrained_models[k], lock_encoder = self.pretrained_models_lock[k])
+            # if self.pretrained_models[k] is not None:
+            #     self.obs_nets[k].load_weights(pretrained_weights = self.pretrained_models[k], lock_encoder = self.pretrained_models_lock[k])
 
         self.activation = None
         if self.feature_activation is not None:

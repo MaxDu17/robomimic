@@ -99,6 +99,33 @@ class VanillaWeighter(WeighingAlgo):
             info = super(VanillaWeighter, self).train_on_batch(batch, epoch, validate=validate)
             predictions = self._forward_training(batch)
 
+            # from matplotlib import pyplot as plt
+            # import numpy as np
+            # anchor = batch["anchor"]["agentview_image"].cpu().detach().numpy()[12]
+            # negative = batch["negative"]["agentview_image"].cpu().detach().numpy()[12]
+            # positive = batch["positive"]["agentview_image"].cpu().detach().numpy()[12]
+            # fig, (ax1, ax2, ax3) = plt.subplots(ncols=3)
+            # ax1.imshow(np.transpose(anchor, (1, 2, 0)))
+            # ax2.imshow(np.transpose(negative, (1, 2, 0)))
+            # ax3.imshow(np.transpose(positive, (1, 2, 0)))
+            # plt.savefig("train.png")
+            # import ipdb
+            # ipdb.set_trace()
+            # print(batch["anchor"]["agentview_image"].shape)
+            # if validate:
+            #     from matplotlib import pyplot as plt
+            #     import numpy as np
+            #     anchor = batch["anchor"]["agentview_image"].cpu().detach().numpy()[12]
+            #     negative = batch["negative"]["agentview_image"].cpu().detach().numpy()[12]
+            #     positive = batch["positive"]["agentview_image"].cpu().detach().numpy()[12]
+            #     fig, (ax1, ax2, ax3) = plt.subplots(ncols = 3)
+            #     ax1.imshow(np.transpose(anchor, (1, 2, 0)))
+            #     ax2.imshow(np.transpose(negative, (1, 2, 0)))
+            #     ax3.imshow(np.transpose(positive, (1, 2, 0)))
+            #     plt.savefig("validation.png")
+            #     import ipdb
+            #     ipdb.set_trace()
+
             losses, accuracy = self._compute_losses(predictions)
             info["accuracy"] = TensorUtils.detach(accuracy)
 
@@ -113,7 +140,6 @@ class VanillaWeighter(WeighingAlgo):
 
     def _shuffle(self, batch):
         batch_size = batch["anchor"][list(batch["anchor"].keys())[0]].shape[0]
-        print(batch_size)
         permutation = torch.randperm(batch_size)
         batch["negative"] = {key : value[permutation] for key, value in batch["negative"].items()}
 
@@ -132,12 +158,10 @@ class VanillaWeighter(WeighingAlgo):
         predictions = OrderedDict()
 
         pos_weights = self.nets["policy"](obs_dict_1=batch["anchor"], obs_dict_2 = batch["positive"])
-        neg_weights = self.nets["policy"](obs_dict_1=batch["anchor"], obs_dict_2 = batch["negative"])
+        neg_weights = self.nets["policy"](obs_dict_1=batch["anchor"], obs_dict_2 = batch["positive"]) #intentional bug
         self._shuffle(batch)
         diff_traj_weights = self.nets["policy"](obs_dict_1=batch["anchor"], obs_dict_2 = batch["negative"])
 
-
-        #TODO: implement other-trajectory shuffling
         predictions["pos"] = pos_weights
         predictions["neg"] = neg_weights
         predictions["diff"] = diff_traj_weights
@@ -160,23 +184,25 @@ class VanillaWeighter(WeighingAlgo):
         losses = OrderedDict()
         pos_target = torch.ones_like(predictions["pos"])
         neg_target = torch.zeros_like(predictions["neg"])
+        diff_target = torch.zeros_like(predictions["diff"])
 
-        losses["pos_loss"] = self.loss(predictions["pos"], pos_target)
-        losses["neg_loss"] = self.loss(predictions["neg"], neg_target)
-        losses["diff_loss"] = self.loss(predictions["diff"], neg_target)
+        # print(predictions["pos"][0:3] ,predictions["neg"][0:3], predictions["diff"][0:3])
 
-        #TODO: different-episode losses
+        concat_pred = torch.cat((predictions["pos"], predictions["neg"], predictions["diff"]), dim = 0)
+        concat_target = torch.cat((pos_target, neg_target, diff_target), dim = 0)
+
+        losses["bce_loss"] = self.loss(concat_pred, concat_target)
 
         accuracy = OrderedDict()
         with torch.no_grad():
             hard_labels_pos = (predictions["pos"] > 0.5).float()
-            accuracy["pos"] = (hard_labels_pos == pos_target).float().mean()
+            accuracy["pos"] = hard_labels_pos.mean()
 
-            hard_labels_neg = (predictions["neg"] > 0.5).float()
-            accuracy["neg"] = (hard_labels_neg == neg_target).float().mean()
+            hard_labels_neg = (predictions["neg"] < 0.5).float()
+            accuracy["neg"] = hard_labels_neg.mean()
 
-            hard_labels_neg = (predictions["diff"] > 0.5).float()
-            accuracy["diff"] = (hard_labels_neg == neg_target).float().mean()
+            hard_labels_diff = (predictions["diff"] < 0.5).float()
+            accuracy["diff"] = hard_labels_diff.mean()
         return losses, accuracy
 
 
@@ -191,10 +217,11 @@ class VanillaWeighter(WeighingAlgo):
 
         # gradient step
         info = OrderedDict()
+        # print(losses)
         policy_grad_norms = TorchUtils.backprop_for_loss(
             net=self.nets["policy"],
             optim=self.optimizers["policy"],
-            loss=losses["pos_loss"] + losses["neg_loss"] + losses["diff_loss"],
+            loss=losses["bce_loss"], # + losses["diff_loss"],
         )
         info["policy_grad_norms"] = policy_grad_norms
         return info
@@ -211,9 +238,10 @@ class VanillaWeighter(WeighingAlgo):
             loss_log (dict): name -> summary statistic
         """
         log = super(VanillaWeighter, self).log_info(info)
-        log["pos_loss"] = info["losses"]["pos_loss"].item()
-        log["neg_loss"] = info["losses"]["neg_loss"].item()
-        log["diff_loss"] = info["losses"]["diff_loss"].item()
+        log["bce_loss"] = info["losses"]["bce_loss"].item()
+        # log["pos_loss"] = info["losses"]["pos_loss"].item()
+        # log["neg_loss"] = info["losses"]["neg_loss"].item()
+        # log["diff_loss"] = info["losses"]["diff_loss"].item()
 
         if "accuracy" in info:
             log["pos_accuracy"] = info["accuracy"]["pos"].item()
@@ -231,6 +259,8 @@ class VanillaWeighter(WeighingAlgo):
         :return:
         """
         assert not self.nets.training
+        # import ipdb
+        # ipdb.set_trace()
         obs_dict_one = TensorUtils.to_tensor(obs_dict_one)
         obs_dict_one = TensorUtils.to_device(obs_dict_one, self.device)
         obs_dict_one = TensorUtils.to_float(obs_dict_one)
@@ -316,7 +346,7 @@ class ContrastiveWeighter(WeighingAlgo):
 
         with TorchUtils.maybe_no_grad(no_grad=validate):
             # this just gets an empty dictionary
-            info = super(ContrastiveWeighter, self).train_on_batch(batch_1, epoch, validate=validate)
+            info = super(ContrastiveWeighter, self).train_on_batch(batch, epoch, validate=validate)
             
             embeddings = self._forward_training(batch)
 
