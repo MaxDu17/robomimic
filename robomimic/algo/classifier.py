@@ -109,22 +109,7 @@ class VanillaWeighter(WeighingAlgo):
             # ax2.imshow(np.transpose(negative, (1, 2, 0)))
             # ax3.imshow(np.transpose(positive, (1, 2, 0)))
             # plt.savefig("train.png")
-            # import ipdb
-            # ipdb.set_trace()
-            # print(batch["anchor"]["agentview_image"].shape)
-            # if validate:
-            #     from matplotlib import pyplot as plt
-            #     import numpy as np
-            #     anchor = batch["anchor"]["agentview_image"].cpu().detach().numpy()[12]
-            #     negative = batch["negative"]["agentview_image"].cpu().detach().numpy()[12]
-            #     positive = batch["positive"]["agentview_image"].cpu().detach().numpy()[12]
-            #     fig, (ax1, ax2, ax3) = plt.subplots(ncols = 3)
-            #     ax1.imshow(np.transpose(anchor, (1, 2, 0)))
-            #     ax2.imshow(np.transpose(negative, (1, 2, 0)))
-            #     ax3.imshow(np.transpose(positive, (1, 2, 0)))
-            #     plt.savefig("validation.png")
-            #     import ipdb
-            #     ipdb.set_trace()
+
 
             losses, accuracy = self._compute_losses(predictions)
             info["accuracy"] = TensorUtils.detach(accuracy)
@@ -157,14 +142,26 @@ class VanillaWeighter(WeighingAlgo):
         """
         predictions = OrderedDict()
 
-        pos_weights = self.nets["policy"](obs_dict_1=batch["anchor"], obs_dict_2 = batch["positive"])
-        neg_weights = self.nets["policy"](obs_dict_1=batch["anchor"], obs_dict_2 = batch["positive"]) #intentional bug
-        self._shuffle(batch)
-        diff_traj_weights = self.nets["policy"](obs_dict_1=batch["anchor"], obs_dict_2 = batch["negative"])
+        # we need to run this through one-shot, or else we risk batchnorm memorizing a pattern
+        combined_anchor = {}
+        combined_alt = {}
+        for key in batch["anchor"].keys():
+            # print(key)
+            anchor = batch["anchor"][key]
+            pos =  batch["positive"][key]
+            neg = batch["negative"][key]
+            combined_anchor[key] = torch.cat((anchor, anchor), dim=0)
+            combined_alt[key] = torch.cat((pos, neg), dim=0)
 
-        predictions["pos"] = pos_weights
-        predictions["neg"] = neg_weights
-        predictions["diff"] = diff_traj_weights
+        self._shuffle(batch)
+        for key in batch["anchor"].keys():
+            anchor = batch["anchor"][key]
+            diff = batch["negative"][key]
+            combined_anchor[key] = torch.cat((combined_anchor[key], anchor), dim=0)
+            combined_alt[key] = torch.cat((combined_alt[key], diff), dim=0)
+
+        predictions["combined"] = self.nets["policy"](obs_dict_1=combined_anchor, obs_dict_2 = combined_alt)
+
         return predictions
 
     def _compute_losses(self, predictions):
@@ -182,27 +179,26 @@ class VanillaWeighter(WeighingAlgo):
         """
 
         losses = OrderedDict()
-        pos_target = torch.ones_like(predictions["pos"])
-        neg_target = torch.zeros_like(predictions["neg"])
-        diff_target = torch.zeros_like(predictions["diff"])
+        original_batch_size = predictions["combined"].shape[0] // 3
+        assert predictions["combined"].shape[0] % 3 == 0
 
-        # print(predictions["pos"][0:3] ,predictions["neg"][0:3], predictions["diff"][0:3])
+        pos_target = torch.ones((original_batch_size,1), device = predictions["combined"].device)
+        neg_target = torch.zeros((original_batch_size * 2,1), device = predictions["combined"].device)
 
-        concat_pred = torch.cat((predictions["pos"], predictions["neg"], predictions["diff"]), dim = 0)
-        concat_target = torch.cat((pos_target, neg_target, diff_target), dim = 0)
-
-        losses["bce_loss"] = self.loss(concat_pred, concat_target)
+        concat_target = torch.cat((pos_target, neg_target), dim=0)
+        losses["bce_loss"] = self.loss(predictions["combined"], concat_target)
 
         accuracy = OrderedDict()
         with torch.no_grad():
-            hard_labels_pos = (predictions["pos"] > 0.5).float()
+            hard_labels_pos = (predictions["combined"][:100] > 0.9).float()
             accuracy["pos"] = hard_labels_pos.mean()
 
-            hard_labels_neg = (predictions["neg"] < 0.5).float()
+            hard_labels_neg = (predictions["combined"][100:200] < 0.1).float()
             accuracy["neg"] = hard_labels_neg.mean()
 
-            hard_labels_diff = (predictions["diff"] < 0.5).float()
+            hard_labels_diff = (predictions["combined"][200:] < 0.1).float()
             accuracy["diff"] = hard_labels_diff.mean()
+
         return losses, accuracy
 
 
@@ -221,7 +217,7 @@ class VanillaWeighter(WeighingAlgo):
         policy_grad_norms = TorchUtils.backprop_for_loss(
             net=self.nets["policy"],
             optim=self.optimizers["policy"],
-            loss=losses["bce_loss"], # + losses["diff_loss"],
+            loss=losses["bce_loss"]
         )
         info["policy_grad_norms"] = policy_grad_norms
         return info
@@ -238,11 +234,6 @@ class VanillaWeighter(WeighingAlgo):
             loss_log (dict): name -> summary statistic
         """
         log = super(VanillaWeighter, self).log_info(info)
-        log["bce_loss"] = info["losses"]["bce_loss"].item()
-        # log["pos_loss"] = info["losses"]["pos_loss"].item()
-        # log["neg_loss"] = info["losses"]["neg_loss"].item()
-        # log["diff_loss"] = info["losses"]["diff_loss"].item()
-
         if "accuracy" in info:
             log["pos_accuracy"] = info["accuracy"]["pos"].item()
             log["neg_accuracy"] = info["accuracy"]["neg"].item()
@@ -259,8 +250,6 @@ class VanillaWeighter(WeighingAlgo):
         :return:
         """
         assert not self.nets.training
-        # import ipdb
-        # ipdb.set_trace()
         obs_dict_one = TensorUtils.to_tensor(obs_dict_one)
         obs_dict_one = TensorUtils.to_device(obs_dict_one, self.device)
         obs_dict_one = TensorUtils.to_float(obs_dict_one)
@@ -398,6 +387,7 @@ class ContrastiveWeighter(WeighingAlgo):
         Returns:
             losses (dict): dictionary of losses computed over the batch
         """
+        # same problem
         losses = OrderedDict()
         batch_size = predictions["anchor_embedding"].shape[0]
 

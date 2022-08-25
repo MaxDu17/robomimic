@@ -96,9 +96,28 @@ class WeighterNet(MIMO_MLP):
         Forward through value network, and then optionally use tanh scaling.
         """
         obs_dict_combined = OrderedDict()
+        batch_size = obs_dict_1[list(obs_dict_1.keys())[0]].shape[0] # a nasty hack, but it is guarenteeed to work
+        random_mask = np.zeros(batch_size, dtype=bool)
+        random_mask[0:batch_size // 2] = 1
+        np.random.shuffle(random_mask)
+        bin_1 = np.where(random_mask)
+        bin_2 = np.where(~random_mask)
+
         for key_1, key_2 in zip(obs_dict_1.keys(), obs_dict_2.keys()):
             assert key_1 == key_2, "The keys you're trying to fuse are not the same!"
+            # permuted_1 = torch.zeros_like(obs_dict_1[key_1])
+            # permuted_2 = torch.zeros_like(obs_dict_2[key_2])
+            #
+            # permuted_1[bin_1] = obs_dict_1[key_1][bin_1]
+            # permuted_2[bin_2] = obs_dict_1[key_1][bin_2]
+            #
+            # permuted_2[bin_1] = obs_dict_2[key_2][bin_1]
+            # permuted_1[bin_2] = obs_dict_2[key_2][bin_2]
+
+
             obs_dict_combined[key_1] = torch.cat((obs_dict_1[key_1], obs_dict_2[key_2]), dim = 1)
+            # obs_dict_combined[key_1] = torch.cat((permuted_1, permuted_2), dim = 1)
+
 
         weights = super(WeighterNet, self).forward(obs=obs_dict_combined)["value"]
         weights = torch.sigmoid(weights)

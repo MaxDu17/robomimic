@@ -583,6 +583,8 @@ def run_epoch(model, data_loader,epoch, validate=False, num_steps=None, second_d
     """
     epoch_timestamp = time.time()
     if validate:
+        # print("wrong settings in train utils")
+        # model.set_train()
         model.set_eval()
     else:
         model.set_train()

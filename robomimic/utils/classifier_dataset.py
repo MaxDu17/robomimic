@@ -81,12 +81,15 @@ class ClassifierDataset(SequenceDataset):
         lower_bound = max(0, index_in_demo - self.radius)
         upper_bound = min(viable_sample_size - 1, index_in_demo + self.radius)
 
-        positive_index_in_demo = np.random.randint(upper_bound - lower_bound) + lower_bound
+        positive_index_in_demo = np.random.randint(lower_bound, upper_bound) #upper_bound - lower_bound) + lower_bound
         perturb = np.random.randint(viable_sample_size - (upper_bound - lower_bound))
         negative_index_in_demo = (upper_bound + perturb) % viable_sample_size
 
+        # print(index_in_demo, positive_index_in_demo, negative_index_in_demo)
         # print(abs(positive_index_in_demo - negative_index_in_demo))
         data = {}
+
+        # profiling this
         data["anchor"] = self.get_obs_sequence_from_demo(
             demo_id,
             index_in_demo=index_in_demo,
