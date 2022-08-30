@@ -20,8 +20,9 @@ class WeighterNet(MIMO_MLP):
         self,
         obs_shapes,
         mlp_layer_dims,
-        weight_bounds=None,
         encoder_kwargs=None,
+        weight_bounds = None,
+        head_activation = "sigmoid"
     ):
         """
         Args:
@@ -56,6 +57,7 @@ class WeighterNet(MIMO_MLP):
         """
         assert isinstance(obs_shapes, OrderedDict)
         self.obs_shapes = obs_shapes
+        self.head_activation = head_activation
 
         # set up different observation groups for @MIMO_MLP
         observation_group_shapes = OrderedDict()
@@ -95,6 +97,7 @@ class WeighterNet(MIMO_MLP):
         """
         Forward through value network, and then optionally use tanh scaling.
         """
+
         obs_dict_combined = OrderedDict()
         batch_size = obs_dict_1[list(obs_dict_1.keys())[0]].shape[0] # a nasty hack, but it is guarenteeed to work
         random_mask = np.zeros(batch_size, dtype=bool)
@@ -118,9 +121,14 @@ class WeighterNet(MIMO_MLP):
             obs_dict_combined[key_1] = torch.cat((obs_dict_1[key_1], obs_dict_2[key_2]), dim = 1)
             # obs_dict_combined[key_1] = torch.cat((permuted_1, permuted_2), dim = 1)
 
-
         weights = super(WeighterNet, self).forward(obs=obs_dict_combined)["value"]
-        weights = torch.sigmoid(weights)
+        if self.head_activation == "sigmoid":
+            weights = torch.sigmoid(weights)
+        elif self.head_activation == "relu":
+            weights = weights
+            # weights = torch.relu(weights)
+        else:
+            raise Exception("invalid head activation type")
         return weights
 
     def _to_string(self):

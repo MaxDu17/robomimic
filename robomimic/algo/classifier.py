@@ -32,6 +32,13 @@ def algo_config_to_class(algo_config = None):
     """
     return ContrastiveWeighter, {}
 
+@register_algo_factory_func("distance")
+def algo_config_to_class(algo_config = None):
+    """
+    Yields the class for the weighing algorithm. Can be expanded to accomodate more fancier classifiers
+    """
+    return DistanceWeighter, {}
+
 class VanillaWeighter(WeighingAlgo):
     """
     A classification model
@@ -45,7 +52,6 @@ class VanillaWeighter(WeighingAlgo):
         """
         Creates networks and places them into @self.nets.
         """
-
         self.nets = nn.ModuleDict()
         self.nets["policy"] = WeighterNet.WeighterNet(
             obs_shapes = self.obs_shapes,
@@ -190,13 +196,13 @@ class VanillaWeighter(WeighingAlgo):
 
         accuracy = OrderedDict()
         with torch.no_grad():
-            hard_labels_pos = (predictions["combined"][:100] > 0.9).float()
+            hard_labels_pos = (predictions["combined"][:original_batch_size] > 0.9).float()
             accuracy["pos"] = hard_labels_pos.mean()
 
-            hard_labels_neg = (predictions["combined"][100:200] < 0.1).float()
+            hard_labels_neg = (predictions["combined"][original_batch_size:original_batch_size * 2] < 0.1).float()
             accuracy["neg"] = hard_labels_neg.mean()
 
-            hard_labels_diff = (predictions["combined"][200:] < 0.1).float()
+            hard_labels_diff = (predictions["combined"][2 * original_batch_size:] < 0.1).float()
             accuracy["diff"] = hard_labels_diff.mean()
 
         return losses, accuracy
@@ -302,15 +308,6 @@ class ContrastiveWeighter(WeighingAlgo):
         input_batch["negative"] = {k: batch["negative"][k][:, 0, :] for k in batch["negative"]}
 
         return TensorUtils.to_device(TensorUtils.to_float(input_batch), self.device)
-        # input_batch_1 = dict()
-        # input_batch_2 = dict()
-        # input_batch_1["obs"] = {k: batch["obs_1"][k][:, 0, :] for k in batch["obs_1"]}
-        # input_batch_2["obs"] = {k: batch["obs_2"][k][:, 0, :] for k in batch["obs_2"]}
-        # labels = batch["label"]
-        #
-        # return (TensorUtils.to_device(TensorUtils.to_float(input_batch_1), self.device),
-        #        TensorUtils.to_device(TensorUtils.to_float(input_batch_2), self.device),
-        #        TensorUtils.to_device(TensorUtils.to_float(labels), self.device))
 
 
     def train_on_batch(self, batch, epoch, validate=False):
@@ -363,16 +360,15 @@ class ContrastiveWeighter(WeighingAlgo):
         Returns:
             predictions (dict): dictionary containing network outputs
         """
-        predictions = OrderedDict()
-        anchor_embedding = self.nets["policy"](obs=batch["anchor"])
-        positive_embedding = self.nets["policy"](obs=batch["positive"])
-        negative_embedding = self.nets["policy"](obs=batch["negative"])
+        combined_data = {}
+        for key in batch["anchor"].keys():
+            anchor = batch["anchor"][key]
+            pos =  batch["positive"][key]
+            neg = batch["negative"][key]
+            combined_data[key] = torch.cat((anchor, pos, neg), dim=0)
 
-
-        predictions["positive_embedding"] = positive_embedding["value"]
-        predictions["negative_embedding"] = negative_embedding["value"]
-        predictions["anchor_embedding"] = anchor_embedding["value"]
-        return predictions
+        embedding = self.nets["policy"](obs=combined_data)["value"]
+        return embedding
 
     def _compute_losses(self, embeddings):
         """
@@ -388,33 +384,34 @@ class ContrastiveWeighter(WeighingAlgo):
             losses (dict): dictionary of losses computed over the batch
         """
         # same problem
+
         losses = OrderedDict()
-        batch_size = predictions["anchor_embedding"].shape[0]
+        batch_size = embeddings.shape[0] // 3
+        assert embeddings.shape[0] % 3 == 0
 
-        pos_cos_target = torch.ones_like(embeddings["anchor_embedding"])
-        neg_cos_target = -1 * torch.ones_like(embeddings["anchor_embedding"])
+        pos_cos_target = torch.ones((batch_size,), device = embeddings.device)
+        neg_cos_target = -1 * torch.ones((batch_size,), device = embeddings.device)
 
-        losses["pos"] = self.loss(predictions["anchor_embedding"], predictions["positive_embedding"], pos_cos_target)
-        losses["neg"] = self.loss(predictions["anchor_embedding"], predictions["negative_embedding"], neg_cos_target)
+        losses["pos"] = self.loss(embeddings[: batch_size], embeddings[batch_size : 2 * batch_size], pos_cos_target)
+        losses["neg"] = self.loss(embeddings[: batch_size], embeddings[2 * batch_size : ], neg_cos_target)
 
-        shuffled_negative_embedding = predictions["negative_embedding"][torch.randperm(batch_size)]
-        import ipdb
-        ipdb.set_trace()
-        losses["diff"] = self.loss(predictions["anchor_embedding"], shuffled_negative_embedding, neg_cos_target)
+        shuffled_negative_indices = torch.randperm(batch_size) + 2 * batch_size
 
+        losses["diff"] = self.loss(embeddings[: batch_size], embeddings[shuffled_negative_indices], neg_cos_target)
+        # print(losses)
         accuracy = OrderedDict()
         with torch.no_grad():
-            positive_pred = (torch.cosine_similarity(predictions["anchor_embedding"],
-                                                     predictions["positive_embedding"]) > 0).float()
-            accuracy["pos"] = (positive_pred == pos_cos_target).float().mean()
+            positive_pred = (torch.cosine_similarity(embeddings[: batch_size],
+                                                     embeddings[batch_size : 2 * batch_size]) > 0).float()
+            accuracy["pos"] = (positive_pred).float().mean()
 
-            negative_pred = (torch.cosine_similarity(predictions["anchor_embedding"],
-                                                     predictions["negative_embedding"]) < 0).float()
-            accuracy["neg"] = (negative_pred == neg_cos_target).float().mean()
+            negative_pred = (torch.cosine_similarity(embeddings[: batch_size],
+                                                     embeddings[2 * batch_size : ]) < 0).float()
+            accuracy["neg"] = (negative_pred).float().mean()
 
-            diff_pred = (torch.cosine_similarity(predictions["anchor_embedding"],
-                                                     shuffledD_negative_embedding) < 0).float()
-            accuracy["diff"] = (diff_pred == neg_cos_target).float().mean()
+            diff_pred = (torch.cosine_similarity(embeddings[: batch_size],
+                                                     embeddings[shuffled_negative_indices]) < 0).float()
+            accuracy["diff"] = (diff_pred).float().mean()
 
         return losses, accuracy
 
@@ -450,12 +447,12 @@ class ContrastiveWeighter(WeighingAlgo):
             loss_log (dict): name -> summary statistic
         """
         log = super(ContrastiveWeighter, self).log_info(info)
-        log["pos_loss"] = not info["losses"]["pos"].item()
-        log["neg_loss"] = not info["losses"]["neg"].item()
-        log["diff_loss"] = not info["losses"]["diff"].item()
-        log["pos_accuracy"] = not info["accuracy"]["pos"].item()
-        log["neg_accuracy"] = not info["accuracy"]["neg"].item()
-        log["diff_accuracy"] = not info["accuracy"]["diff"].item()
+        log["pos_loss"] = info["losses"]["pos"].item()
+        log["neg_loss"] = info["losses"]["neg"].item()
+        log["diff_loss"] = info["losses"]["diff"].item()
+        log["pos_accuracy"] = info["accuracy"]["pos"].item()
+        log["neg_accuracy"] = info["accuracy"]["neg"].item()
+        log["diff_accuracy"] = info["accuracy"]["diff"].item()
 
         if "policy_grad_norms" in info:
             log["Policy_Grad_Norms"] = info["policy_grad_norms"]
@@ -472,3 +469,184 @@ class ContrastiveWeighter(WeighingAlgo):
         embedding_1 = self.nets["policy"](obs=obs_dict_one["obs"])
         embedding_2 = self.nets["policy"](obs=obs_dict_two["obs"])
         return 0.5 * (torch.cosine_similarity(embedding_1["value"], embedding_2["value"], dim) + 1)
+
+
+class DistanceWeighter(WeighingAlgo):
+    """
+    A classification model
+    """
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.loss = nn.MSELoss()
+
+    def _create_networks(self):
+        """
+        Creates networks and places them into @self.nets.
+        """
+        self.nets = nn.ModuleDict()
+        self.nets["policy"] = WeighterNet.WeighterNet(
+            obs_shapes=self.obs_shapes,
+            mlp_layer_dims=self.algo_config.actor_layer_dims,
+            head_activation = "relu",
+            encoder_kwargs=ObsUtils.obs_encoder_kwargs_from_config(self.obs_config.encoder),
+        )
+
+        self.nets = self.nets.float().to(self.device)
+
+    def process_batch_for_training(self, batch):
+        """
+        Processes input batch from a data loader to filter out
+        relevant information and prepare the batch for training.
+
+        Args:
+            batch (dict): dictionary with torch.Tensors sampled
+                from a data loader
+
+        Returns:
+            input_batch (dict): processed and filtered batch that
+                will be used for training
+        """
+        input_batch = dict()
+        input_batch["anchor"] = {k: batch["anchor"][k][:, 0, :] for k in batch["anchor"]}
+        input_batch["second"] = {k: batch["second"][k][:, 0, :] for k in batch["second"]}
+        input_batch["distance"] = batch["distance"]
+
+
+        return TensorUtils.to_device(TensorUtils.to_float(input_batch), self.device)
+
+    def train_on_batch(self, batch, epoch, validate=False):
+        """
+        Training on a single batch of data.
+
+        Args:
+            batch (dict): dictionary with torch.Tensors sampled
+                from a data loader and filtered by @process_batch_for_training
+
+            epoch (int): epoch number - required by some Algos that need
+                to perform staged training and early stopping
+
+            validate (bool): if True, don't perform any learning updates.
+
+        Returns:
+            info (dict): dictionary of relevant inputs, outputs, and losses
+                that might be relevant for logging
+        """
+
+        with TorchUtils.maybe_no_grad(no_grad=validate):
+            info = super(DistanceWeighter, self).train_on_batch(batch, epoch, validate=validate)
+            predictions = self._forward_training(batch)
+
+            losses, accuracy = self._compute_losses(predictions, batch)
+            info["accuracy"] = TensorUtils.detach(accuracy)
+
+            info["predictions"] = TensorUtils.detach(predictions)
+            info["losses"] = TensorUtils.detach(losses)
+            if not validate:
+                step_info = self._train_step(losses)
+                info.update(step_info)
+
+        return info
+
+    def _shuffle(self, batch):
+        batch_size = batch["anchor"][list(batch["anchor"].keys())[0]].shape[0]
+        permutation = torch.randperm(batch_size)
+        batch["negative"] = {key: value[permutation] for key, value in batch["negative"].items()}
+
+    def _forward_training(self, batch):
+        """
+        Internal helper function for weighting algo class. Compute forward pass
+        and return network outputs in @predictions dict.
+
+        Args:
+            batch (dict): dictionary with torch.Tensors sampled
+                from a data loader and filtered by @process_batch_for_training
+
+        Returns:
+            predictions (dict): dictionary containing network outputs
+        """
+        predictions = self.nets["policy"](obs_dict_1=batch["anchor"], obs_dict_2=batch["second"])
+        # print(predictions[0:10])
+        return predictions
+
+    def _compute_losses(self, predictions, batch):
+        """
+        Internal helper function for weighting algo class. Compute losses based on
+        network outputs in @predictions dict, using reference labels in @batch.
+
+        Args:
+            predictions (dict): dictionary containing network outputs, from @_forward_training
+            batch (dict): dictionary with torch.Tensors sampled
+                from a data loader and filtered by @process_batch_for_training
+
+        Returns:
+            losses (dict): dictionary of losses computed over the batch
+        """
+        losses = OrderedDict()
+        labels = torch.unsqueeze(batch["distance"], 1)
+        losses["MSE_loss"] = self.loss(predictions, labels)
+
+        with torch.no_grad():
+            hard_labels = (torch.abs(predictions - labels) < 3).float()
+            accuracy = hard_labels.mean()
+
+        return losses, accuracy
+
+    def _train_step(self, losses):
+        """
+        Internal helper function for weighting algo class. Perform backpropagation on the
+        loss tensors in @losses to update networks.
+
+        Args:
+            losses (dict): dictionary of losses computed over the batch, from @_compute_losses
+        """
+
+        # gradient step
+        info = OrderedDict()
+        # print(losses)
+        policy_grad_norms = TorchUtils.backprop_for_loss(
+            net=self.nets["policy"],
+            optim=self.optimizers["policy"],
+            loss=losses["MSE_loss"]
+        )
+        info["policy_grad_norms"] = policy_grad_norms
+        return info
+
+    def log_info(self, info):
+        """
+        Process info dictionary from @train_on_batch to summarize
+        information to pass to tensorboard for logging.
+
+        Args:
+            info (dict): dictionary of info
+
+        Returns:
+            loss_log (dict): name -> summary statistic
+        """
+        log = super(DistanceWeighter, self).log_info(info)
+        log["loss"] = info["losses"]["MSE_loss"].item()
+        if "accuracy" in info:
+            log["accuracy"] = info["accuracy"].item()
+        if "policy_grad_norms" in info:
+            log["Policy_Grad_Norms"] = info["policy_grad_norms"]
+        return log
+
+    def similarity_score(self, obs_dict_one, obs_dict_two):
+        """
+        Args:
+            obs_dict_one: first set of observations
+            obs_dict_two: second set of observations
+        :return:
+        """
+        assert not self.nets.training
+        obs_dict_one = TensorUtils.to_tensor(obs_dict_one)
+        obs_dict_one = TensorUtils.to_device(obs_dict_one, self.device)
+        obs_dict_one = TensorUtils.to_float(obs_dict_one)
+
+        obs_dict_two = TensorUtils.to_tensor(obs_dict_two)
+        obs_dict_two = TensorUtils.to_device(obs_dict_two, self.device)
+        obs_dict_two = TensorUtils.to_float(obs_dict_two)
+
+        distance = self.nets["policy"](obs_dict_one, obs_dict_two)
+        raise Exception("can't use distance here")
+        return distance

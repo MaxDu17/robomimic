@@ -21,8 +21,7 @@ import robomimic.utils.tensor_utils as TensorUtils
 import robomimic.utils.log_utils as LogUtils
 
 from robomimic.utils.dataset import SequenceDataset
-from robomimic.utils.classifier_dataset import ClassifierDataset
-from robomimic.utils.soft_classifier_dataset import SoftClassifierDataset
+from robomimic.utils.classifier_dataset import ClassifierDataset, DistanceClassifierDataset
 from robomimic.envs.env_base import EnvBase
 from robomimic.algo import RolloutPolicy
 
@@ -175,14 +174,14 @@ def dataset_factory(config, obs_keys, filter_by_attribute=None, dataset_path=Non
         weighting = weighting,
         num_samples = num_samples
     )
-    if modifications == "classifier":
+    if modifications == "pos_neg_pair":
         ds_kwargs["radius"] = config.train.radius
         ds_kwargs["use_actions"] = config.train.actions
         # ds_kwargs["same_traj"] = config.train.same_traj
         dataset = ClassifierDataset(**ds_kwargs)
-    elif modifications == "soft_classifier":
-        ds_kwargs["alpha"] = config.train.alpha
-        dataset = SoftClassifierDataset(**ds_kwargs)
+    elif modifications == "distance":
+        ds_kwargs["use_actions"] = config.train.actions
+        dataset = DistanceClassifierDataset(**ds_kwargs)
     else:
         dataset = SequenceDataset(**ds_kwargs)
 

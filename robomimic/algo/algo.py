@@ -66,6 +66,7 @@ def algo_factory(algo_name, config, obs_key_shapes, ac_dim, device):
 
     # use algo factory func to get algo class and kwargs from algo config
     factory_func = algo_name_to_factory_func(algo_name)
+
     algo_cls, algo_kwargs = factory_func(config.algo)
 
     # create algo instance
