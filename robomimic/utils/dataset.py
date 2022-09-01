@@ -457,7 +457,14 @@ class SequenceDataset(torch.utils.data.Dataset):
         for index_in_demo in LogUtils.custom_tqdm(range(max_length)):
             frame_list = list()
             for demo in demos:
-                frames = self.get_dataset_for_ep(demo, "obs/agentview_image")
+                try:
+                    frames = self.get_dataset_for_ep(demo, "obs/agentview_image")
+                except:
+                    try:
+                        frames = self.get_dataset_for_ep(demo, "obs/sideview_image")
+                    except:
+                        frames = np.zeros((84, 84, 3)) #if nothing works, then we just render a blank screen
+
                 demo_start_index = self._demo_id_to_start_indices[demo]
                 if index_in_demo < self._demo_id_to_demo_length[demo]:
                     current_frame = frames[index_in_demo]
@@ -594,6 +601,7 @@ class SequenceDataset(torch.utils.data.Dataset):
             # we map the index to the actual indices that it corresponds to
             index_in_demo = int(self.hdf5_cache[demo_id]["corrections"][index_in_demo])
         self._last_samples.append(index_in_demo) #logging where in the rollout we care
+        print(len(list(self._last_samples)))
         # end at offset index if not padding for seq length
         demo_length_offset = 0 if self.pad_seq_length else (self.seq_length - 1)
         end_index_in_demo = viable_sample_size - demo_length_offset

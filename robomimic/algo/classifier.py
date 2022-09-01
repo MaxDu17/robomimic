@@ -120,8 +120,7 @@ class VanillaWeighter(WeighingAlgo):
             losses, accuracy = self._compute_losses(predictions)
             info["accuracy"] = TensorUtils.detach(accuracy)
 
-            # NOT DONE
-            info["predictions"] = TensorUtils.detach(predictions)
+            info["predictions"] = TensorUtils.detach(predictions["combined"])
             info["losses"] = TensorUtils.detach(losses)
             if not validate:
                 step_info = self._train_step(losses)

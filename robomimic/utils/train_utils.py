@@ -555,7 +555,8 @@ def weld_batches(first_batch, second_batch):
 
 def run_epoch(model, data_loader,epoch, validate=False, num_steps=None, second_data_loader = None,
               stopping = "step",
-              stopping_norm = 5000000):
+              stopping_norm = 5000000,
+              return_predictions = False):
     """
     Run an epoch of training or validation.
 
@@ -600,7 +601,6 @@ def run_epoch(model, data_loader,epoch, validate=False, num_steps=None, second_d
 
     norm_list = list()
     for _ in LogUtils.custom_tqdm(range(num_steps)):
-
         # load next batch from data loader
         try:
             t = time.time()
@@ -655,6 +655,10 @@ def run_epoch(model, data_loader,epoch, validate=False, num_steps=None, second_d
         # sum across all training steps, and convert from seconds to minutes
         step_log_all["Time_{}".format(k)] = np.sum(timing_stats[k]) / 60.
     step_log_all["Time_Epoch"] = (time.time() - epoch_timestamp) / 60.
+
+    if return_predictions:
+        # if this returns an error, then it might be because you're not using the vanilla classifier
+        return step_log_all, info["predictions"]
 
     return step_log_all
 
