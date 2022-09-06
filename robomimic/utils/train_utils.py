@@ -21,7 +21,7 @@ import robomimic.utils.tensor_utils as TensorUtils
 import robomimic.utils.log_utils as LogUtils
 
 from robomimic.utils.dataset import SequenceDataset
-from robomimic.utils.classifier_dataset import ClassifierDataset, DistanceClassifierDataset
+from robomimic.utils.classifier_dataset import ClassifierDataset, DistanceClassifierDataset, TemporalEmbeddingDataset
 from robomimic.envs.env_base import EnvBase
 from robomimic.algo import RolloutPolicy
 
@@ -182,6 +182,8 @@ def dataset_factory(config, obs_keys, filter_by_attribute=None, dataset_path=Non
     elif modifications == "distance":
         ds_kwargs["use_actions"] = config.train.actions
         dataset = DistanceClassifierDataset(**ds_kwargs)
+    elif modifications == "temporal_embedding":
+        dataset = TemporalEmbeddingDataset(**ds_kwargs)
     else:
         dataset = SequenceDataset(**ds_kwargs)
 

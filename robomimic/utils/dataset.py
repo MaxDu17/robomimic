@@ -194,7 +194,7 @@ class SequenceDataset(torch.utils.data.Dataset):
         if not update: #if we are updating, we should not be clearing
             # keep internal index maps to know which transitions belong to which demos
             self._index_to_demo_id = dict()  # maps every index to a demo id
-            self._weight_list = dict()
+            # self._weight_list = dict()
             self._demo_id_to_start_indices = dict()  # gives start index per demo id
             self._demo_id_to_demo_length = dict()
             self._demo_id_to_true_length = dict()
@@ -229,9 +229,10 @@ class SequenceDataset(torch.utils.data.Dataset):
 
             for _ in range(num_sequences):
                 self._index_to_demo_id[self.total_num_sequences] = ep
-                self._weight_list[self.total_num_sequences] = 1
+                # self._weight_list[self.total_num_sequences] = 1
                 self.total_num_sequences += 1
 
+        self._weight_list = np.ones((self.total_num_sequences,))
 
     @property
     def hdf5_file(self):
@@ -432,8 +433,11 @@ class SequenceDataset(torch.utils.data.Dataset):
         interventions = ObsUtils.process_obs_dict(interventions) #normalize and change shapes
         index = 0
 
+        TEMPERATURE = 1
+
         for demo in LogUtils.custom_tqdm(self.demos):
             all_demo_data = {key : self.get_dataset_for_ep(demo, f"obs/{key}") for key in self.obs_keys}
+            start_index = index
             for index_in_demo in range(self._demo_id_to_demo_length[demo]):
                 transition = {key: value[index_in_demo] for key, value in all_demo_data.items()}
                 transition = {key: np.repeat(np.expand_dims(value, 0), num_samples, axis = 0) for key, value in
@@ -442,9 +446,16 @@ class SequenceDataset(torch.utils.data.Dataset):
                 all_scores = classifier.similarity_score(interventions, transition)
 
                 mean_score = all_scores.mean().item()
-                mean_score = epsilon if mean_score < THRESHOLD else mean_score
+                # mean_score = epsilon if mean_score < epsilon else mean_score # used to be THRESHOLD, but now we are normalizing
                 self._weight_list[index] = mean_score
                 index += 1
+            end_index = index
+
+            # NORMALIZATION PROCESS
+            self._weight_list[start_index : end_index] = np.exp(self._weight_list[start_index : end_index] / TEMPERATURE)
+            self._weight_list[start_index : end_index] = self._weight_list[start_index : end_index] / np.sum(self._weight_list[start_index : end_index])
+            # self._weight_list[start_index : end_index] *= (end_index - start_index - 1) #scaling each element between 0 and 1, insted of the sum
+
 
     def visualize_demo(self, num_demos, video_writer):
         demos = np.random.choice(self.demos, num_demos)
@@ -601,7 +612,6 @@ class SequenceDataset(torch.utils.data.Dataset):
             # we map the index to the actual indices that it corresponds to
             index_in_demo = int(self.hdf5_cache[demo_id]["corrections"][index_in_demo])
         self._last_samples.append(index_in_demo) #logging where in the rollout we care
-        print(len(list(self._last_samples)))
         # end at offset index if not padding for seq length
         demo_length_offset = 0 if self.pad_seq_length else (self.seq_length - 1)
         end_index_in_demo = viable_sample_size - demo_length_offset
@@ -807,11 +817,13 @@ class SequenceDataset(torch.utils.data.Dataset):
         """
         if self.weighting:
             print("WEIGHTING SAMPLER")
-        return torch.utils.data.sampler.WeightedRandomSampler(list(self._weight_list.values()), self.total_num_sequences, replacement = True)  # if we are weighting
+        # return torch.utils.data.sampler.WeightedRandomSampler(list(self._weight_list.values()), self.total_num_sequences, replacement = True)  # if we are weighting
+        return torch.utils.data.sampler.WeightedRandomSampler(self._weight_list.tolist(), self.total_num_sequences, replacement = True)  # if we are weighting
         # return None
 
     def get_weight_list(self):
-        return list(self._weight_list.values())
+        return self._weight_list.tolist()
+        # return list(self._weight_list.values())
 
     def get_sample_distribution(self):
         return list(self._last_samples)

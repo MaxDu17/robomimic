@@ -167,7 +167,6 @@ class Algo(object):
         """
         self.optimizers = dict()
         self.lr_schedulers = dict()
-
         for k in self.optim_params:
             # only make optimizers for networks that have been created - @optim_params may have more
             # settings for unused networks

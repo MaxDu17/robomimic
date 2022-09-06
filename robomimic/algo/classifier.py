@@ -39,6 +39,13 @@ def algo_config_to_class(algo_config = None):
     """
     return DistanceWeighter, {}
 
+@register_algo_factory_func("temporal_embedding")
+def algo_config_to_class(algo_config = None):
+    """
+    Yields the class for the weighing algorithm. Can be expanded to accomodate more fancier classifiers
+    """
+    return TemporalEmbeddingWeighter, {}
+
 class VanillaWeighter(WeighingAlgo):
     """
     A classification model
@@ -59,7 +66,6 @@ class VanillaWeighter(WeighingAlgo):
             mlp_layer_dims=self.algo_config.actor_layer_dims,
             encoder_kwargs=ObsUtils.obs_encoder_kwargs_from_config(self.obs_config.encoder),
         )
-
 
         self.nets = self.nets.float().to(self.device)
 
@@ -332,7 +338,7 @@ class ContrastiveWeighter(WeighingAlgo):
         with TorchUtils.maybe_no_grad(no_grad=validate):
             # this just gets an empty dictionary
             info = super(ContrastiveWeighter, self).train_on_batch(batch, epoch, validate=validate)
-            
+
             embeddings = self._forward_training(batch)
 
             losses, accuracy = self._compute_losses(embeddings)
@@ -467,6 +473,199 @@ class ContrastiveWeighter(WeighingAlgo):
         assert not self.nets.training
         embedding_1 = self.nets["policy"](obs=obs_dict_one["obs"])
         embedding_2 = self.nets["policy"](obs=obs_dict_two["obs"])
+        return 0.5 * (torch.cosine_similarity(embedding_1["value"], embedding_2["value"], dim) + 1)
+
+class TemporalEmbeddingWeighter(WeighingAlgo):
+    """
+    A classification model
+    """
+
+    def _create_networks(self):
+        """
+        Creates networks and places them into @self.nets.
+        """
+        self.nets = nn.ModuleDict()
+        observation_group_shapes = OrderedDict()
+        observation_group_shapes["obs"] = OrderedDict(self.obs_shapes)
+        observation_with_action = deepcopy(observation_group_shapes)
+        observation_with_action["obs"]["actions"] = [7,] #temp hardcoding
+
+        #TODO: verify that it is taking all modalities
+        self.nets["embedder"] = MIMO_MLP(
+            input_obs_group_shapes=observation_with_action,
+            layer_dims=self.algo_config.actor_layer_dims,
+            output_shapes=OrderedDict(value=(self.algo_config.embedding_size,)),
+            encoder_kwargs=ObsUtils.obs_encoder_kwargs_from_config(self.obs_config.encoder),
+        )
+        self.nets["future"] = MIMO_MLP(
+            input_obs_group_shapes=observation_group_shapes,
+            layer_dims=self.algo_config.actor_layer_dims,
+            output_shapes=OrderedDict(value=(self.algo_config.embedding_size,)),
+            encoder_kwargs=ObsUtils.obs_encoder_kwargs_from_config(self.obs_config.encoder),
+        )
+        self.nets = self.nets.float().to(self.device)
+        self.loss = nn.BCEWithLogitsLoss(pos_weight = 100 * torch.eye(100, device = self.device) + torch.ones((100,100), device = self.device)) #with logits, or without?
+
+    def process_batch_for_training(self, batch):
+        """
+        Processes input batch from a data loader to filter out
+        relevant information and prepare the batch for training.
+
+        Args:
+            batch (dict): dictionary with torch.Tensors sampled
+                from a data loader
+
+        Returns:
+            input_batch (dict): processed and filtered batch that
+                will be used for training
+        """
+        input_batch = dict()
+        input_batch["anchor"] = {k: batch["anchor"][k][:, 0, :] for k in batch["anchor"]}
+        input_batch["future"] = {k: batch["future"][k][:, 0, :] for k in batch["future"]}
+
+        return TensorUtils.to_device(TensorUtils.to_float(input_batch), self.device)
+
+    def train_on_batch(self, batch, epoch, validate=False):
+        """
+        Training on a single batch of data.
+
+        Args:
+            batch (dict): tuple of dictionaries with torch.Tensors sampled
+                from a data loader and filtered by @process_batch_for_training
+
+            epoch (int): epoch number - required by some Algos that need
+                to perform staged training and early stopping
+
+            validate (bool): if True, don't perform any learning updates.
+
+        Returns:
+            info (dict): dictionary of relevant inputs, outputs, and losses
+                that might be relevant for logging
+        """
+
+        # batch_1, batch_2, labels = batch # different batch strcutrue
+
+        with TorchUtils.maybe_no_grad(no_grad=validate):
+            # this just gets an empty dictionary
+            info = super(TemporalEmbeddingWeighter, self).train_on_batch(batch, epoch, validate=validate)
+
+            embeddings = self._forward_training(batch)
+
+            losses, accuracy = self._compute_losses(embeddings)
+            info["accuracy"] = TensorUtils.detach(accuracy)
+
+            # info["predictions"] = TensorUtils.detach(predictions)
+            info["losses"] = TensorUtils.detach(losses)
+
+            if not validate:
+                step_info = self._train_step(losses)
+                info.update(step_info)
+
+        return info
+
+    def _forward_training(self, batch):
+        """
+        Internal helper function for weighting algo class. Compute forward pass
+        and return network outputs in @predictions dict.
+
+        Args:
+            batch (dict): dictionary with torch.Tensors sampled
+                from a data loader and filtered by @process_batch_for_training
+
+        Returns:
+            predictions (dict): dictionary containing network outputs
+        """
+        combined_data = {}
+
+        current_embedding = self.nets["embedder"](obs=batch["anchor"])["value"]
+        future_embedding = self.nets["future"](obs=batch["future"])["value"]
+        return current_embedding, future_embedding
+
+    def _compute_losses(self, embeddings):
+        """
+        Internal helper function for weighting algo class. Compute losses based on
+        network outputs in @predictions dict, using reference labels in @batch.
+
+        Args:
+            predictions (dict): dictionary containing network outputs, from @_forward_training
+            batch (dict): dictionary with torch.Tensors sampled
+                from a data loader and filtered by @process_batch_for_training
+
+        Returns:
+            losses (dict): dictionary of losses computed over the batch
+        """
+        # same problem
+        current_embedding, future_embedding = embeddings
+        batch_size = current_embedding.shape[0]
+        # batch x embed dim
+
+        similarity_matrix = current_embedding @ future_embedding.T
+        key = torch.eye(batch_size, device = similarity_matrix.device)
+
+        losses = self.loss(similarity_matrix, key)
+
+        # print(losses)
+        accuracy = OrderedDict()
+        with torch.no_grad():
+            accuracy["on_diagonal"] = torch.sum(torch.diagonal(similarity_matrix)) / batch_size
+            accuracy["off_diagonal"] = (torch.sum(similarity_matrix) -
+                                        torch.sum(torch.diagonal(similarity_matrix))) / (batch_size**2 - batch_size)
+
+        return losses, accuracy
+
+    def _train_step(self, losses):
+        """
+        Internal helper function for weighting algo class. Perform backpropagation on the
+        loss tensors in @losses to update networks.
+
+        Args:
+            losses (dict): dictionary of losses computed over the batch, from @_compute_losses
+        """
+
+        # gradient step
+        info = OrderedDict()
+        torch.autograd.set_detect_anomaly(True)
+        policy_grad_norms = TorchUtils.backprop_for_loss(
+            net=self.nets,
+            optim=self.optimizers["embedder"],
+            loss=losses,
+            # retain_graph = True, #because we need to optimize multiple times
+        )
+
+        info["policy_grad_norms"] = policy_grad_norms
+        return info
+
+    def log_info(self, info):
+        """
+        Process info dictionary from @train_on_batch to summarize
+        information to pass to tensorboard for logging.
+
+        Args:
+            info (dict): dictionary of info
+
+        Returns:
+            loss_log (dict): name -> summary statistic
+        """
+        log = super(TemporalEmbeddingWeighter, self).log_info(info)
+        log["loss"] = info["losses"].item()
+        log["on_diagonal_average"] = info["accuracy"]["on_diagonal"].item()
+        log["off_diagonal_average"] = info["accuracy"]["off_diagonal"].item()
+
+        if "policy_grad_norms" in info:
+            log["Policy_Grad_Norms"] = info["policy_grad_norms"]
+
+        return log
+
+    def similarity_score(self, obs_dict_one, obs_dict_two):
+        """
+        Args:
+            obs_dict_one: first set of observations
+            obs_dict_two: second set of observations
+        :return:
+        """
+        assert not self.nets.training
+        embedding_1 = self.nets["embedder"](obs=obs_dict_one["obs"])
+        embedding_2 = self.nets["embedder"](obs=obs_dict_two["obs"])
         return 0.5 * (torch.cosine_similarity(embedding_1["value"], embedding_2["value"], dim) + 1)
 
 
