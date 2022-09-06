@@ -504,7 +504,7 @@ class TemporalEmbeddingWeighter(WeighingAlgo):
             encoder_kwargs=ObsUtils.obs_encoder_kwargs_from_config(self.obs_config.encoder),
         )
         self.nets = self.nets.float().to(self.device)
-        self.loss = nn.BCEWithLogitsLoss(pos_weight = 100 * torch.eye(100, device = self.device) + torch.ones((100,100), device = self.device)) #with logits, or without?
+        self.loss = nn.BCEWithLogitsLoss() #pos_weight = 100 * torch.eye(100, device = self.device) + torch.ones((100,100), device = self.device)) #with logits, or without?
 
     def process_batch_for_training(self, batch):
         """
@@ -602,14 +602,19 @@ class TemporalEmbeddingWeighter(WeighingAlgo):
         similarity_matrix = current_embedding @ future_embedding.T
         key = torch.eye(batch_size, device = similarity_matrix.device)
 
+        # loss_fn =  nn.BCEWithLogitsLoss(pos_weight = 100 * torch.ones_like(key))
         losses = self.loss(similarity_matrix, key)
 
         # print(losses)
         accuracy = OrderedDict()
         with torch.no_grad():
-            accuracy["on_diagonal"] = torch.sum(torch.diagonal(similarity_matrix)) / batch_size
-            accuracy["off_diagonal"] = (torch.sum(similarity_matrix) -
-                                        torch.sum(torch.diagonal(similarity_matrix))) / (batch_size**2 - batch_size)
+            maximums = torch.argmax(similarity_matrix, dim = 1)
+            labels = torch.arange(batch_size, device = self.device)
+            accuracy["maximums"] = (maximums == labels).float().mean()
+
+            # accuracy["on_diagonal"] = torch.sum(torch.diagonal(similarity_matrix)) / batch_size
+            # accuracy["off_diagonal"] = (torch.sum(similarity_matrix) -
+            #                             torch.sum(torch.diagonal(similarity_matrix))) / (batch_size**2 - batch_size)
 
         return losses, accuracy
 
@@ -648,8 +653,9 @@ class TemporalEmbeddingWeighter(WeighingAlgo):
         """
         log = super(TemporalEmbeddingWeighter, self).log_info(info)
         log["loss"] = info["losses"].item()
-        log["on_diagonal_average"] = info["accuracy"]["on_diagonal"].item()
-        log["off_diagonal_average"] = info["accuracy"]["off_diagonal"].item()
+        log["accuracy"] = info["accuracy"]["maximums"].item()
+        # log["on_diagonal_average"] = info["accuracy"]["on_diagonal"].item()
+        # log["off_diagonal_average"] = info["accuracy"]["off_diagonal"].item()
 
         if "policy_grad_norms" in info:
             log["Policy_Grad_Norms"] = info["policy_grad_norms"]
