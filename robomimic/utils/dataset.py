@@ -234,6 +234,23 @@ class SequenceDataset(torch.utils.data.Dataset):
 
         self._weight_list = np.ones((self.total_num_sequences,))
 
+    def compute_own_embeddings(self, classifier):
+        assert self.weighting, "You must enable weighting to weigh the dataset!"
+        assert self.hdf5_cache is not None, "Cachine is not yet implemented for weighted sampling"
+        assert not self.priority, "Priority sampling is not yet implemented for weighted sampling"
+
+        print("precomputing demo embeddings!")
+        embedding_list = list()
+        for demo in LogUtils.custom_tqdm(self.demos):
+            all_demo_data = {key: self.get_dataset_for_ep(demo, f"obs/{key}") for key in self.obs_keys}
+            for index_in_demo in range(self._demo_id_to_demo_length[demo]):
+                transition = {key: value[index_in_demo] for key, value in all_demo_data.items()}
+                transition = ObsUtils.process_obs_dict(transition)  # normalize and change shapes
+                embedding_list.append(classifier.compute_embeddings(transition))
+        import ipdb
+        ipdb.set_trace()
+        self.offline_embeddings = torch.stack(embedding_list, dim = 0)
+
     @property
     def hdf5_file(self):
         """
@@ -405,56 +422,87 @@ class SequenceDataset(torch.utils.data.Dataset):
                 self.hdf5_cache[ep]["attrs"]["model_file"] = hdf5_file["data/{}".format(ep)].attrs["model_file"]
         print(f"Now there are {len(self.hdf5_cache.keys())} demos in the buffer.")
 
+
     def reweight_data(self, intervention_set, classifier, THRESHOLD = 0, epsilon = 0.01):
-        """
-        :param intervention_set: a queue of dicts, each containing one observation
-        :param classifier: a pretrained classifier model that takes in two observations and predicts similarity score
-        :param THRESHOLD: a number below which everything is set to epsilon (to make it very unlikely to be sampled)
-        :param epsilon: a small number that substitues for 0 as the minimum (to prevent all weights from collapsing)
-        """
+        print("Reweighting data!")
         assert self.weighting, "You must enable weighting to weigh the dataset!"
         assert self.hdf5_cache is not None, "Cachine is not yet implemented for weighted sampling"
         assert not self.priority, "Priority sampling is not yet implemented for weighted sampling"
-        num_samples = len(intervention_set) # number of samples we are comparing
 
         interventions_intermediate = {}
-        print("rewiring interventions")
 
         # turning a queue of dicts into one dict
         for sample in intervention_set:
-            for key in self.obs_keys: #only select items that are used in the interventions
+            for key in self.obs_keys:  # only select items that are used in the interventions
                 if key not in interventions_intermediate:
                     interventions_intermediate[key] = list()
                 interventions_intermediate[key].append(sample[key])
         interventions = {}
 
         for key, value in interventions_intermediate.items():
-            interventions[key] = np.stack(value, axis = 0)
-        interventions = ObsUtils.process_obs_dict(interventions) #normalize and change shapes
-        index = 0
+            interventions[key] = np.stack(value, axis=0)
+        interventions = ObsUtils.process_obs_dict(interventions)  # normalize and change shapes
+        intervention_embeddings = classifier.compute_embeddings(interventions) #interventions X embedding matrix
 
-        TEMPERATURE = 1
+        import ipdb
+        ipdb.set_trace()
+        similarity_matrix = intervention_embeddings @ self.offline_embeddings.T # intervention X offline
 
-        for demo in LogUtils.custom_tqdm(self.demos):
-            all_demo_data = {key : self.get_dataset_for_ep(demo, f"obs/{key}") for key in self.obs_keys}
-            start_index = index
-            for index_in_demo in range(self._demo_id_to_demo_length[demo]):
-                transition = {key: value[index_in_demo] for key, value in all_demo_data.items()}
-                transition = {key: np.repeat(np.expand_dims(value, 0), num_samples, axis = 0) for key, value in
-                              transition.items()}  # make a pseudobatch
-                transition = ObsUtils.process_obs_dict(transition) #normalize and change shapes
-                all_scores = classifier.similarity_score(interventions, transition)
+        self._weight_list = similarity_matrix.mean(dim = 0)
+        self._weight_list = (self._weight_list - torch.min(self._weight_list)) / (torch.max(self._weight_list) - torch.min(self._weight_list))
+        self._weight_list = torch.clip(self._weight_list, min = epsilon, max = 1)
 
-                mean_score = all_scores.mean().item()
-                # mean_score = epsilon if mean_score < epsilon else mean_score # used to be THRESHOLD, but now we are normalizing
-                self._weight_list[index] = mean_score
-                index += 1
-            end_index = index
 
-            # NORMALIZATION PROCESS
-            self._weight_list[start_index : end_index] = np.exp(self._weight_list[start_index : end_index] / TEMPERATURE)
-            self._weight_list[start_index : end_index] = self._weight_list[start_index : end_index] / np.sum(self._weight_list[start_index : end_index])
-            # self._weight_list[start_index : end_index] *= (end_index - start_index - 1) #scaling each element between 0 and 1, insted of the sum
+    # def reweight_data(self, intervention_set, classifier, THRESHOLD = 0, epsilon = 0.01):
+    #     """
+    #     :param intervention_set: a queue of dicts, each containing one observation
+    #     :param classifier: a pretrained classifier model that takes in two observations and predicts similarity score
+    #     :param THRESHOLD: a number below which everything is set to epsilon (to make it very unlikely to be sampled)
+    #     :param epsilon: a small number that substitues for 0 as the minimum (to prevent all weights from collapsing)
+    #     """
+    #     assert self.weighting, "You must enable weighting to weigh the dataset!"
+    #     assert self.hdf5_cache is not None, "Cachine is not yet implemented for weighted sampling"
+    #     assert not self.priority, "Priority sampling is not yet implemented for weighted sampling"
+    #     num_samples = len(intervention_set) # number of samples we are comparing
+    #
+    #     interventions_intermediate = {}
+    #     print("rewiring interventions")
+    #
+    #     # turning a queue of dicts into one dict
+    #     for sample in intervention_set:
+    #         for key in self.obs_keys: #only select items that are used in the interventions
+    #             if key not in interventions_intermediate:
+    #                 interventions_intermediate[key] = list()
+    #             interventions_intermediate[key].append(sample[key])
+    #     interventions = {}
+    #
+    #     for key, value in interventions_intermediate.items():
+    #         interventions[key] = np.stack(value, axis = 0)
+    #     interventions = ObsUtils.process_obs_dict(interventions) #normalize and change shapes
+    #     index = 0
+    #
+    #     TEMPERATURE = 1
+    #
+    #     for demo in LogUtils.custom_tqdm(self.demos):
+    #         all_demo_data = {key : self.get_dataset_for_ep(demo, f"obs/{key}") for key in self.obs_keys}
+    #         start_index = index
+    #         for index_in_demo in range(self._demo_id_to_demo_length[demo]):
+    #             transition = {key: value[index_in_demo] for key, value in all_demo_data.items()}
+    #             transition = {key: np.repeat(np.expand_dims(value, 0), num_samples, axis = 0) for key, value in
+    #                           transition.items()}  # make a pseudobatch
+    #             transition = ObsUtils.process_obs_dict(transition) #normalize and change shapes
+    #             all_scores = classifier.similarity_score(interventions, transition)
+    #
+    #             mean_score = all_scores.mean().item()
+    #             # mean_score = epsilon if mean_score < epsilon else mean_score # used to be THRESHOLD, but now we are normalizing
+    #             self._weight_list[index] = mean_score
+    #             index += 1
+    #         end_index = index
+    #
+    #         # NORMALIZATION PROCESS
+    #         self._weight_list[start_index : end_index] = np.exp(self._weight_list[start_index : end_index] / TEMPERATURE)
+    #         self._weight_list[start_index : end_index] = self._weight_list[start_index : end_index] / np.sum(self._weight_list[start_index : end_index])
+    #         # self._weight_list[start_index : end_index] *= (end_index - start_index - 1) #scaling each element between 0 and 1, insted of the sum
 
 
     def visualize_demo(self, num_demos, video_writer):

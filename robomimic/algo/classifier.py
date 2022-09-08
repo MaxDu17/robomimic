@@ -502,7 +502,10 @@ class TemporalEmbeddingWeighter(WeighingAlgo):
             layer_dims=self.algo_config.actor_layer_dims,
             output_shapes=OrderedDict(value=(self.algo_config.embedding_size,)),
             encoder_kwargs=ObsUtils.obs_encoder_kwargs_from_config(self.obs_config.encoder),
+            copy_from = self.nets["embedder"],
+            modalities_to_copy = ["agentview_image", "robot0_eye_in_hand_image"] #  WILL NOT WORK WITH LOWDIM!!
         )
+
         self.nets = self.nets.float().to(self.device)
         self.loss = nn.BCEWithLogitsLoss() #pos_weight = 100 * torch.eye(100, device = self.device) + torch.ones((100,100), device = self.device)) #with logits, or without?
 
@@ -543,7 +546,21 @@ class TemporalEmbeddingWeighter(WeighingAlgo):
                 that might be relevant for logging
         """
 
-        # batch_1, batch_2, labels = batch # different batch strcutrue
+        # from matplotlib import pyplot as plt
+        # import numpy as np
+        # fig, axs = plt.subplots(ncols=2, nrows = 2)
+        # anchor = batch["anchor"]["agentview_image"].cpu().detach().numpy()[14]
+        # future = batch["future"]["agentview_image"].cpu().detach().numpy()[14]
+        # axs[0, 0].imshow(np.transpose(anchor, (1, 2, 0)))
+        # axs[0, 1].imshow(np.transpose(future, (1, 2, 0)))
+        # anchor = batch["anchor"]["agentview_image"].cpu().detach().numpy()[12]
+        # future = batch["future"]["agentview_image"].cpu().detach().numpy()[12]
+        # axs[1, 0].imshow(np.transpose(anchor, (1, 2, 0)))
+        # axs[1, 1].imshow(np.transpose(future, (1, 2, 0)))
+        # plt.savefig("train.png")
+        #
+        # import ipdb
+        # ipdb.set_trace()
 
         with TorchUtils.maybe_no_grad(no_grad=validate):
             # this just gets an empty dictionary
@@ -551,11 +568,12 @@ class TemporalEmbeddingWeighter(WeighingAlgo):
 
             embeddings = self._forward_training(batch)
 
-            losses, accuracy = self._compute_losses(embeddings)
+            losses, accuracy, sim_matrix = self._compute_losses(embeddings)
             info["accuracy"] = TensorUtils.detach(accuracy)
 
             # info["predictions"] = TensorUtils.detach(predictions)
             info["losses"] = TensorUtils.detach(losses)
+            info["product_matrix"] = torch.sigmoid(sim_matrix.detach()).cpu().numpy()
 
             if not validate:
                 step_info = self._train_step(losses)
@@ -616,7 +634,7 @@ class TemporalEmbeddingWeighter(WeighingAlgo):
             # accuracy["off_diagonal"] = (torch.sum(similarity_matrix) -
             #                             torch.sum(torch.diagonal(similarity_matrix))) / (batch_size**2 - batch_size)
 
-        return losses, accuracy
+        return losses, accuracy, similarity_matrix
 
     def _train_step(self, losses):
         """
@@ -674,6 +692,9 @@ class TemporalEmbeddingWeighter(WeighingAlgo):
         embedding_2 = self.nets["embedder"](obs=obs_dict_two["obs"])
         return 0.5 * (torch.cosine_similarity(embedding_1["value"], embedding_2["value"], dim) + 1)
 
+    def compute_embeddings(self, obs_dict):
+        assert not self.nets.training
+        return self.nets["embedder"](obs = obs_dict)
 
 class DistanceWeighter(WeighingAlgo):
     """

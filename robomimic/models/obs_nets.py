@@ -29,8 +29,7 @@ def obs_encoder_factory(
         obs_shapes,
         feature_activation=nn.ReLU,
         encoder_kwargs=None,
-        pretrained_weights = None,
-        lock = None
+        nets_to_share = None
     ):
     """
     Utility function to create an @ObservationEncoder from kwargs specified in config.
@@ -88,16 +87,21 @@ def obs_encoder_factory(
             ObsUtils.OBS_RANDOMIZERS[enc_kwargs["obs_randomizer_class"]](**enc_kwargs["obs_randomizer_kwargs"])
 
 
-        enc.register_obs_key(
-            name=k,
-            shape=obs_shape,
-            net_class=enc_kwargs["core_class"],
-            net_kwargs=enc_kwargs["core_kwargs"],
-            randomizer=randomizer,
-            load_net_from = pretrained_weights.get(k, None) if pretrained_weights is not None else None,
-            load_and_lock = lock.get(k, None) if lock is not None else None
-        )
-
+        if nets_to_share is not None and k in nets_to_share:
+            enc.register_obs_key(
+                name=k,
+                shape=obs_shape,
+                net = nets_to_share[k],
+                randomizer=randomizer,
+            )
+        else:
+            enc.register_obs_key(
+                name=k,
+                shape=obs_shape,
+                net_class=enc_kwargs["core_class"],
+                net_kwargs=enc_kwargs["core_kwargs"],
+                randomizer=randomizer,
+            )
     enc.make()
     return enc
 
@@ -123,9 +127,6 @@ class ObservationEncoder(Module):
         self.obs_nets = nn.ModuleDict()
         self.obs_randomizers = nn.ModuleDict()
 
-        self.pretrained_models = OrderedDict()
-        self.pretrained_models_lock = OrderedDict()
-
         self.feature_activation = feature_activation
         self._locked = False
 
@@ -138,8 +139,6 @@ class ObservationEncoder(Module):
         net=None,
         randomizer=None,
         share_net_from=None,
-        load_net_from = None,
-        load_and_lock = False,
     ):
         """
         Register an observation key that this encoder should be responsible for.
@@ -158,8 +157,6 @@ class ObservationEncoder(Module):
             share_net_from (str): if provided, use the same instance of @net_class
                 as another observation key. This observation key must already exist in this encoder.
                 Warning: Note that this does not share the observation key randomizer
-            load_net_from (str): if provided, load the network from a pretrained file
-            load_and_lock (bool): if True, locks the encoder
         """
         assert not self._locked, "ObservationEncoder: @register_obs_key called after @make"
         assert name not in self.obs_shapes, "ObservationEncoder: modality {} already exists".format(name)
@@ -187,8 +184,11 @@ class ObservationEncoder(Module):
         self.obs_nets[name] = net
         self.obs_randomizers[name] = randomizer
         self.obs_share_mods[name] = share_net_from
-        self.pretrained_models[name] = load_net_from
-        self.pretrained_models_lock[name] = load_and_lock
+
+    def extract_encoder_for(self, modality):
+        if modality in self.obs_nets:
+            return self.obs_nets[modality]
+        raise Exception("modality does not exist!")
 
     def make(self):
         """
@@ -204,7 +204,7 @@ class ObservationEncoder(Module):
         """
         assert not self._locked, "ObservationEncoder: layers have already been created"
         for k in self.obs_shapes:
-            if self.obs_nets_classes[k] is not None:
+            if self.obs_nets_classes[k] is not None: #will not happen if the modalities are copied
                 # create net to process this modality
                 self.obs_nets[k] = ObsUtils.OBS_ENCODER_CORES[self.obs_nets_classes[k]](**self.obs_nets_kwargs[k])
             elif self.obs_share_mods[k] is not None:
@@ -389,8 +389,7 @@ class ObservationGroupEncoder(Module):
         observation_group_shapes,
         feature_activation=nn.ReLU,
         encoder_kwargs=None,
-        pretrained_weights = None,
-        lock = None
+        nets_to_share = None,
     ):
         """
         Args:
@@ -401,6 +400,8 @@ class ObservationGroupEncoder(Module):
 
             feature_activation: non-linearity to apply after each obs net - defaults to ReLU. Pass
                 None to apply no activation.
+
+            nets_to_share (dict or None): if a dictionary of name : nn.Module is provided, we will share parameters with the provided modules
 
             encoder_kwargs (dict or None): If None, results in default encoder_kwargs being applied. Otherwise, should
                 be nested dictionary containing relevant per-modality information for encoder networks.
@@ -434,9 +435,14 @@ class ObservationGroupEncoder(Module):
                 obs_shapes=self.observation_group_shapes[obs_group],
                 feature_activation=feature_activation,
                 encoder_kwargs=encoder_kwargs,
-                pretrained_weights=pretrained_weights.get(obs_group, None) if pretrained_weights is not None else None,
-                lock=lock.get(obs_group, None) if lock is not None else None
+                nets_to_share = nets_to_share
             )
+
+    def extract_encoder_for(self, modality, observation_group = "obs"):
+        return self.nets[observation_group].extract_encoder_for(modality)
+        # if modality in self.nets:
+        #     return self.nets[modality]
+        # raise Exception("Modality provided doesn't exist!")
 
     def forward(self, **inputs):
         """
@@ -511,11 +517,13 @@ class MIMO_MLP(Module):
         layer_func=nn.Linear,
         activation=nn.ReLU,
         encoder_kwargs=None,
-        pretrained_weights=None,
-        lock=None
+        copy_from = None,
+        modalities_to_copy = None
     ):
         """
         Args:
+            copy_from (MIMO_MLP): another MLP module to copy weights from
+            modalities_to_copy (list): modalities from that MLP module to copy from s
             input_obs_group_shapes (OrderedDict): a dictionary of dictionaries.
                 Each key in this dictionary should specify an observation group, and
                 the value should be an OrderedDict that maps modalities to
@@ -558,12 +566,17 @@ class MIMO_MLP(Module):
 
         self.nets = nn.ModuleDict()
 
+        nets_to_share = None
+        if copy_from is not None and modalities_to_copy is not None:
+            nets_to_share = dict()
+            for modality in modalities_to_copy:
+                nets_to_share[modality] = copy_from.nets["encoder"].extract_encoder_for(modality)
+
         # Encoder for all observation groups.
         self.nets["encoder"] = ObservationGroupEncoder(
             observation_group_shapes=input_obs_group_shapes,
             encoder_kwargs=encoder_kwargs,
-            pretrained_weights=pretrained_weights,
-            lock=lock
+            nets_to_share = nets_to_share
         )
 
         # flat encoder output dimension

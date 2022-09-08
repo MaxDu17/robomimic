@@ -558,7 +558,8 @@ def weld_batches(first_batch, second_batch):
 def run_epoch(model, data_loader,epoch, validate=False, num_steps=None, second_data_loader = None,
               stopping = "step",
               stopping_norm = 5000000,
-              return_predictions = False):
+              return_predictions = False,
+              return_matrix = False):
     """
     Run an epoch of training or validation.
 
@@ -661,6 +662,9 @@ def run_epoch(model, data_loader,epoch, validate=False, num_steps=None, second_d
     if return_predictions:
         # if this returns an error, then it might be because you're not using the vanilla classifier
         return step_log_all, info["predictions"]
+
+    if return_matrix:
+        return step_log_all, info["product_matrix"] #take the last part of the vlaidation 
 
     return step_log_all
 
