@@ -208,7 +208,9 @@ class TemporalEmbeddingDataset(SequenceDataset):
         demo_index_offset = 0 if self.pad_frame_stack else (self.n_frame_stack - 1)  # only works for one frame stack
         index_in_demo = index - demo_start_index + demo_index_offset
 
-        second_index_in_demo = min(viable_sample_size - 1, index_in_demo + 1)
+        second_index_in_demo = index_in_demo
+        
+        # second_index_in_demo = min(viable_sample_size - 1, index_in_demo + 1)
         # second_index_in_demo = min(viable_sample_size - 1, np.random.geometric(0.1) + index_in_demo) #the s^+ is some steps in the future
 
         data = {}

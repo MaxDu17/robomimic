@@ -694,7 +694,12 @@ class TemporalEmbeddingWeighter(WeighingAlgo):
 
     def compute_embeddings(self, obs_dict):
         assert not self.nets.training
-        return self.nets["embedder"](obs = obs_dict)
+        obs_dict = TensorUtils.to_tensor(obs_dict)
+        obs_dict = TensorUtils.to_device(obs_dict, self.device)
+        obs_dict = TensorUtils.to_float(obs_dict)
+        with torch.no_grad(): #make sure we aren't saving the computation graphs, or we can have a memory leak 
+            embed = self.nets["embedder"](obs = obs_dict)["value"].detach().cpu().numpy()
+        return embed
 
 class DistanceWeighter(WeighingAlgo):
     """

@@ -241,15 +241,25 @@ class SequenceDataset(torch.utils.data.Dataset):
 
         print("precomputing demo embeddings!")
         embedding_list = list()
+        label_list = list()
         for demo in LogUtils.custom_tqdm(self.demos):
             all_demo_data = {key: self.get_dataset_for_ep(demo, f"obs/{key}") for key in self.obs_keys}
+            action_data = self.get_dataset_for_ep(demo, "actions") #for use in the embeddings
+            success = self.get_dataset_for_ep(demo, "rewards")[-1] #for use in the embeddings
+
+            #TODO: find a batched version. Current problem is that images are in the form of hdf5 datasets, and are extracted using [] notation
             for index_in_demo in range(self._demo_id_to_demo_length[demo]):
                 transition = {key: value[index_in_demo] for key, value in all_demo_data.items()}
+                transition["actions"] = action_data[index_in_demo]
+                transition = {key : np.expand_dims(value, axis = 0) for key, value in transition.items()}
                 transition = ObsUtils.process_obs_dict(transition)  # normalize and change shapes
-                embedding_list.append(classifier.compute_embeddings(transition))
-        import ipdb
-        ipdb.set_trace()
-        self.offline_embeddings = torch.stack(embedding_list, dim = 0)
+                embed = classifier.compute_embeddings(transition)
+                embedding_list.append(embed)
+                label_list.append(success)
+
+            # break # temporary for analysis purposes
+        self.offline_embeddings = np.concatenate(embedding_list, axis = 0)
+        self.label_list = np.array(label_list)
 
     @property
     def hdf5_file(self):
@@ -449,8 +459,8 @@ class SequenceDataset(torch.utils.data.Dataset):
         similarity_matrix = intervention_embeddings @ self.offline_embeddings.T # intervention X offline
 
         self._weight_list = similarity_matrix.mean(dim = 0)
-        self._weight_list = (self._weight_list - torch.min(self._weight_list)) / (torch.max(self._weight_list) - torch.min(self._weight_list))
-        self._weight_list = torch.clip(self._weight_list, min = epsilon, max = 1)
+        self._weight_list = (self._weight_list - np.min(self._weight_list)) / (np.max(self._weight_list) - np.min(self._weight_list))
+        self._weight_list = np.clip(self._weight_list, min = epsilon, max = 1)
 
 
     # def reweight_data(self, intervention_set, classifier, THRESHOLD = 0, epsilon = 0.01):
