@@ -489,6 +489,8 @@ class TemporalEmbeddingWeighter(WeighingAlgo):
         observation_group_shapes["obs"] = OrderedDict(self.obs_shapes)
         observation_with_action = deepcopy(observation_group_shapes)
         observation_with_action["obs"]["actions"] = [7,] #temp hardcoding
+        copy_from = None
+        modalities_to_copy = None
 
         #TODO: verify that it is taking all modalities
         self.nets["embedder"] = MIMO_MLP(
@@ -497,13 +499,18 @@ class TemporalEmbeddingWeighter(WeighingAlgo):
             output_shapes=OrderedDict(value=(self.algo_config.embedding_size,)),
             encoder_kwargs=ObsUtils.obs_encoder_kwargs_from_config(self.obs_config.encoder),
         )
+
+        if "agentview_image" in observation_group_shapes["obs"] or "robot0_eye_in_hand_image" in observation_group_shapes["obs"]:
+            copy_from = self.nets["embedder"]
+            modalities_to_copy = ["agentview_image", "robot0_eye_in_hand_image"]
+
         self.nets["future"] = MIMO_MLP(
             input_obs_group_shapes=observation_group_shapes,
             layer_dims=self.algo_config.actor_layer_dims,
             output_shapes=OrderedDict(value=(self.algo_config.embedding_size,)),
             encoder_kwargs=ObsUtils.obs_encoder_kwargs_from_config(self.obs_config.encoder),
-            copy_from = self.nets["embedder"],
-            modalities_to_copy = ["agentview_image", "robot0_eye_in_hand_image"] #  WILL NOT WORK WITH LOWDIM!!
+            copy_from = copy_from,
+            modalities_to_copy = modalities_to_copy #  WILL NOT WORK WITH LOWDIM!!
         )
 
         self.nets = self.nets.float().to(self.device)
@@ -630,10 +637,6 @@ class TemporalEmbeddingWeighter(WeighingAlgo):
             labels = torch.arange(batch_size, device = self.device)
             accuracy["maximums"] = (maximums == labels).float().mean()
 
-            # accuracy["on_diagonal"] = torch.sum(torch.diagonal(similarity_matrix)) / batch_size
-            # accuracy["off_diagonal"] = (torch.sum(similarity_matrix) -
-            #                             torch.sum(torch.diagonal(similarity_matrix))) / (batch_size**2 - batch_size)
-
         return losses, accuracy, similarity_matrix
 
     def _train_step(self, losses):
@@ -697,7 +700,7 @@ class TemporalEmbeddingWeighter(WeighingAlgo):
         obs_dict = TensorUtils.to_tensor(obs_dict)
         obs_dict = TensorUtils.to_device(obs_dict, self.device)
         obs_dict = TensorUtils.to_float(obs_dict)
-        with torch.no_grad(): #make sure we aren't saving the computation graphs, or we can have a memory leak 
+        with torch.no_grad(): #make sure we aren't saving the computation graphs, or we can have a memory leak
             embed = self.nets["embedder"](obs = obs_dict)["value"].detach().cpu().numpy()
         return embed
 
