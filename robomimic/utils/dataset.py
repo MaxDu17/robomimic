@@ -94,6 +94,8 @@ class SequenceDataset(torch.utils.data.Dataset):
         self.priority = priority #if we priority sample from interventiosn only
         self.weighting = weighting
         self._last_samples = deque([], maxlen=10000)
+        self._last_samples_identity = deque([], maxlen=10000)
+        self.label_list = None
 
         print(hdf5_cache_mode)
         assert hdf5_cache_mode in ["all", "low_dim", None]
@@ -242,24 +244,24 @@ class SequenceDataset(torch.utils.data.Dataset):
         print("precomputing demo embeddings!")
         embedding_list = list()
         label_list = list()
+
+        counter = 0
         for demo in LogUtils.custom_tqdm(self.demos):
-            all_demo_data = {key: self.get_dataset_for_ep(demo, f"obs/{key}") for key in self.obs_keys}
+            counter += 1 #for plotting purposes
+            # if counter % 3 != 0:
+            #     continue
+            all_demo_data = {key: self.get_dataset_for_ep(demo, f"obs/{key}")[:] for key in self.obs_keys}
             action_data = self.get_dataset_for_ep(demo, "actions") #for use in the embeddings
-            success = self.get_dataset_for_ep(demo, "rewards")[-1] #for use in the embeddings
+            success = self.get_dataset_for_ep(demo, "rewards")[-1] #for plotting purposes only
+            all_demo_data["actions"] = action_data
+            all_demo_data = ObsUtils.process_obs_dict(all_demo_data)
 
-            #TODO: find a batched version. Current problem is that images are in the form of hdf5 datasets, and are extracted using [] notation
-            for index_in_demo in range(self._demo_id_to_demo_length[demo]):
-                transition = {key: value[index_in_demo] for key, value in all_demo_data.items()}
-                transition["actions"] = action_data[index_in_demo]
-                transition = {key : np.expand_dims(value, axis = 0) for key, value in transition.items()}
-                transition = ObsUtils.process_obs_dict(transition)  # normalize and change shapes
-                embed = classifier.compute_embeddings(transition)
-                embedding_list.append(embed)
-                label_list.append(success)
+            embed = classifier.compute_embeddings(all_demo_data)
+            embedding_list.append(embed)
+            label_list.extend([success for _ in range(embed.shape[0])])
 
-            # break # temporary for analysis purposes
         self.offline_embeddings = np.concatenate(embedding_list, axis = 0)
-        self.label_list = np.array(label_list)
+        self.label_list = np.array(label_list) #used mostly for plotting purposes
 
     @property
     def hdf5_file(self):
@@ -439,29 +441,30 @@ class SequenceDataset(torch.utils.data.Dataset):
         assert self.hdf5_cache is not None, "Cachine is not yet implemented for weighted sampling"
         assert not self.priority, "Priority sampling is not yet implemented for weighted sampling"
 
-        interventions_intermediate = {}
-
-        # turning a queue of dicts into one dict
-        for sample in intervention_set:
-            for key in self.obs_keys:  # only select items that are used in the interventions
-                if key not in interventions_intermediate:
-                    interventions_intermediate[key] = list()
-                interventions_intermediate[key].append(sample[key])
-        interventions = {}
-
-        for key, value in interventions_intermediate.items():
-            interventions[key] = np.stack(value, axis=0)
+        if type(intervention_set) != dict: #for feeding in a raw ring buffer
+            interventions_intermediate = {}
+            interventions_intermediate["actions"] = list()
+            # turning a queue of dicts into one dict
+            for sample in intervention_set:
+                for key in self.obs_keys:  # only select items that are used in the interventions
+                    if key not in interventions_intermediate:
+                        interventions_intermediate[key] = list()
+                    interventions_intermediate[key].append(sample[key])
+                interventions_intermediate["actions"].append(sample["actions"])
+            interventions = {}
+            for key, value in interventions_intermediate.items():
+                interventions[key] = np.stack(value, axis=0)
+        else:
+            # this is if we are already given the data in the desired form
+            interventions = intervention_set
         interventions = ObsUtils.process_obs_dict(interventions)  # normalize and change shapes
-        intervention_embeddings = classifier.compute_embeddings(interventions) #interventions X embedding matrix
 
-        import ipdb
-        ipdb.set_trace()
+        intervention_embeddings = classifier.compute_embeddings(interventions) #interventions X embedding matrix
         similarity_matrix = intervention_embeddings @ self.offline_embeddings.T # intervention X offline
 
-        self._weight_list = similarity_matrix.mean(dim = 0)
+        self._weight_list = np.mean(similarity_matrix, axis = 0)
         self._weight_list = (self._weight_list - np.min(self._weight_list)) / (np.max(self._weight_list) - np.min(self._weight_list))
-        self._weight_list = np.clip(self._weight_list, min = epsilon, max = 1)
-
+        self._weight_list[np.where(self._weight_list < THRESHOLD)] = 0 #hard cutoff
 
     # def reweight_data(self, intervention_set, classifier, THRESHOLD = 0, epsilon = 0.01):
     #     """
@@ -670,6 +673,8 @@ class SequenceDataset(torch.utils.data.Dataset):
             # we map the index to the actual indices that it corresponds to
             index_in_demo = int(self.hdf5_cache[demo_id]["corrections"][index_in_demo])
         self._last_samples.append(index_in_demo) #logging where in the rollout we care
+        if self.label_list is not None:
+            self._last_samples_identity.append(self.label_list[index])
         # end at offset index if not padding for seq length
         demo_length_offset = 0 if self.pad_seq_length else (self.seq_length - 1)
         end_index_in_demo = viable_sample_size - demo_length_offset
@@ -873,16 +878,14 @@ class SequenceDataset(torch.utils.data.Dataset):
         See the `train` function in scripts/train.py, and torch
         `DataLoader` documentation, for more info.
         """
-        if self.weighting:
-            print("WEIGHTING SAMPLER")
         # return torch.utils.data.sampler.WeightedRandomSampler(list(self._weight_list.values()), self.total_num_sequences, replacement = True)  # if we are weighting
         return torch.utils.data.sampler.WeightedRandomSampler(self._weight_list.tolist(), self.total_num_sequences, replacement = True)  # if we are weighting
         # return None
 
     def get_weight_list(self):
-        return self._weight_list.tolist()
+        return self._weight_list
         # return list(self._weight_list.values())
 
     def get_sample_distribution(self):
-        return list(self._last_samples)
+        return np.array(list(self._last_samples)), np.array(list(self._last_samples_identity))
 

@@ -288,8 +288,6 @@ class ContrastiveWeighter(WeighingAlgo):
             layer_dims=self.algo_config.actor_layer_dims,
             output_shapes = OrderedDict(value = (self.algo_config.embedding_size, )),
             encoder_kwargs=ObsUtils.obs_encoder_kwargs_from_config(self.obs_config.encoder),
-            # pretrained_weights=self.algo_config.pretrained_weights,
-            # lock=self.algo_config.lock_encoder
         )
         self.nets = self.nets.float().to(self.device)
         self.loss = nn.CosineEmbeddingLoss(margin = -1)
@@ -552,22 +550,6 @@ class TemporalEmbeddingWeighter(WeighingAlgo):
             info (dict): dictionary of relevant inputs, outputs, and losses
                 that might be relevant for logging
         """
-
-        # from matplotlib import pyplot as plt
-        # import numpy as np
-        # fig, axs = plt.subplots(ncols=2, nrows = 2)
-        # anchor = batch["anchor"]["agentview_image"].cpu().detach().numpy()[14]
-        # future = batch["future"]["agentview_image"].cpu().detach().numpy()[14]
-        # axs[0, 0].imshow(np.transpose(anchor, (1, 2, 0)))
-        # axs[0, 1].imshow(np.transpose(future, (1, 2, 0)))
-        # anchor = batch["anchor"]["agentview_image"].cpu().detach().numpy()[12]
-        # future = batch["future"]["agentview_image"].cpu().detach().numpy()[12]
-        # axs[1, 0].imshow(np.transpose(anchor, (1, 2, 0)))
-        # axs[1, 1].imshow(np.transpose(future, (1, 2, 0)))
-        # plt.savefig("train.png")
-        #
-        # import ipdb
-        # ipdb.set_trace()
 
         with TorchUtils.maybe_no_grad(no_grad=validate):
             # this just gets an empty dictionary

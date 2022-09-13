@@ -35,8 +35,6 @@ def obs_encoder_factory(
     Utility function to create an @ObservationEncoder from kwargs specified in config.
 
     Args:
-        pretrained_weights (dict): if provided, this allows for the encoder to be loaded from a file
-        lock (dict): if True, we will lock the encoder
         obs_shapes (OrderedDict): a dictionary that maps observation key to
             expected shapes for observations.
 
@@ -210,9 +208,6 @@ class ObservationEncoder(Module):
             elif self.obs_share_mods[k] is not None:
                 # make sure net is shared with another modality
                 self.obs_nets[k] = self.obs_nets[self.obs_share_mods[k]]
-
-            # if self.pretrained_models[k] is not None:
-            #     self.obs_nets[k].load_weights(pretrained_weights = self.pretrained_models[k], lock_encoder = self.pretrained_models_lock[k])
 
         self.activation = None
         if self.feature_activation is not None:
@@ -665,8 +660,6 @@ class RNN_MIMO_MLP(Module):
         mlp_layer_func=nn.Linear,
         per_step=True,
         encoder_kwargs=None,
-        pretrained_weights=None,
-        lock=None
     ):
         """
         Args:
@@ -706,8 +699,6 @@ class RNN_MIMO_MLP(Module):
                         ...
                 obs_modality2: dict
                     ...
-            pretrained_weights (dict): a dictionary of weight files, for use in preloading weights
-            lock (dict): a boolean dictionary that enables/disables training of encoder weights
         """
         super(RNN_MIMO_MLP, self).__init__()
         assert isinstance(input_obs_group_shapes, OrderedDict)
@@ -723,8 +714,6 @@ class RNN_MIMO_MLP(Module):
         self.nets["encoder"] = ObservationGroupEncoder(
             observation_group_shapes=input_obs_group_shapes,
             encoder_kwargs=encoder_kwargs,
-            pretrained_weights = pretrained_weights,
-            lock = lock
         )
 
 
