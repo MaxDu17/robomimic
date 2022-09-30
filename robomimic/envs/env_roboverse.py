@@ -99,41 +99,36 @@ class EnvRoboverse(EB.EnvBase):
         return self.get_observation(di)
 
     def reset_to(self, state):
-        """
-        Reset to a specific simulator state.
+        raise Exception("not working!")
+        pass
 
-        Args:
-            state (dict): current simulator state that contains one or more of:
-                - states (np.ndarray): initial state of the mujoco environment
-                - model (str): mujoco scene xml
+    #     """
+    #     Reset to a specific simulator state.
+    #
+    #     Args:
+    #         state (dict): current simulator state that contains one or more of:
+    #             - states (np.ndarray): initial state of the mujoco environment
+    #             - model (str): mujoco scene xml
+    #
+    #     Returns:
+    #         observation (dict): observation dictionary after setting the simulator state (only
+    #             if "states" is in @state)
+    #     """
+    #
+    #     base_po, base_v, joint_states = state["states"]
+    #     p2 = self.env.env._p
+    #     for i in range(p2.getNumBodies()):
+    #         p2.resetBasePositionAndOrientation(i, *base_po[i])
+    #         p2.resetBaseVelocity(i, *base_v[i])
+    #         for j in range(p2.getNumJoints(i)):
+    #             p2.resetJointState(i, j, *joint_states[i][j][:2])
+    #
+    #     if should_ret:
+    #         # only return obs if we've done a forward call - otherwise the observations will be garbage
+    #         return self.get_observation()
+    #     return None
 
-        Returns:
-            observation (dict): observation dictionary after setting the simulator state (only
-                if "states" is in @state)
-        """
-        should_ret = False
-        if "model" in state:
-            self.reset()
-            xml = postprocess_model_xml(state["model"])
-            self.env.reset_from_xml_string(xml)
-            self.env.sim.reset()
-            if not self._is_v1:
-                # hide teleop visualization after restoring from model
-                self.env.sim.model.site_rgba[self.env.eef_site_id] = np.array([0., 0., 0., 0.])
-                self.env.sim.model.site_rgba[self.env.eef_cylinder_id] = np.array([0., 0., 0., 0.])
-        if "states" in state:
-            self.env.sim.set_state_from_flattened(state["states"])
-            self.env.sim.forward()
-            should_ret = True
-
-        if "goal" in state:
-            self.set_goal(**state["goal"])
-        if should_ret:
-            # only return obs if we've done a forward call - otherwise the observations will be garbage
-            return self.get_observation()
-        return None
-
-    def render(self, mode="human", height=None, width=None, camera_name="agentview"):
+    def render(self, mode="rgb_array", height=None, width=None, camera_name="agentview"):
         """
         Render from simulation to either an on-screen window or off-screen to RGB array.
 
@@ -143,12 +138,9 @@ class EnvRoboverse(EB.EnvBase):
             width (int): width of image to render - only used if mode is "rgb_array"
             camera_name (str): camera name to use for rendering
         """
-        if mode == "human":
-            cam_id = self.env.sim.model.camera_name2id(camera_name)
-            self.env.viewer.set_camera(cam_id)
-            return self.env.render()
-        elif mode == "rgb_array":
-            return self.env.sim.render(height=height, width=width, camera_name=camera_name)[::-1]
+        assert mode != "human"
+        if mode == "rgb_array":
+            return self.env.render_obs(res = height)
         else:
             raise NotImplementedError("mode={} is not implemented".format(mode))
 
@@ -159,13 +151,13 @@ class EnvRoboverse(EB.EnvBase):
     def get_observation(self, di=None):
         """
         Get current environment observation dictionary.
-
         Args:
             di (dict): current raw observation dictionary from robosuite to wrap and provide
                 as a dictionary. If not provided, will be queried from robosuite.
         """
-
+        di = self.env.get_observation()
         if di is None:
+            raise Exception("not implemented!")
             di = self.env._get_observations(force_update=True) if self._is_v1 else self.env._get_observation()
         ret = {}
         for k in di:
@@ -174,21 +166,31 @@ class EnvRoboverse(EB.EnvBase):
                 if self.postprocess_visual_obs:
                     ret[k] = ObsUtils.process_obs(obs=ret[k], obs_key=k)
 
-        ret["proprio"] = np.array(di["robot_state"])
-        ret["eef_pos"] = np.array(di["eef_pos"])
-        ret["eef_quat"] = np.array(di["eef_quat"])
-        ret["gripper_qpos"] = np.array(di["gripper_qpos"])
-        ret["object"] = np.array(di["object"])
+        # ret["proprio"] = np.array(di["robot_state"])
+        # ret["eef_pos"] = np.array(di["eef_pos"])
+        # ret["eef_quat"] = np.array(di["eef_quat"])
+        # ret["gripper_qpos"] = np.array(di["gripper_qpos"])
+        # ret["object"] = np.array(di["object"])
+        ret["state"] = np.array(di["state"])
         return ret
 
     def get_state(self):
         """
         Get current environment simulator state as a dictionary. Should be compatible with @reset_to.
         """
-        return {}
-        xml = self.env.sim.model.get_xml()  # model xml file
-        state = np.array(self.env.sim.get_state().flatten())  # simulator state
-        return dict(model=xml, states=state)
+        p1 = self.env.env._p
+        base_po = []  # position and orientation of base for each body
+        base_v = []  # velocity of base for each body
+        joint_states = []  # joint states for each body
+        for i in range(p1.getNumBodies()):
+            base_po.append(p1.getBasePositionAndOrientation(i))
+            base_v.append(p1.getBaseVelocity(i))
+            joint_states.append([p1.getJointState(i, j) for j in range(p1.getNumJoints(i))])
+        return {"states" : (base_po, base_v, joint_states)}
+
+    def set_whole_state(self, state):
+        #TODO: parsing here allows for separate state inputs for robot, drawers, etc
+        self.env.set_whole_state(state)
 
     def get_reward(self):
         """
