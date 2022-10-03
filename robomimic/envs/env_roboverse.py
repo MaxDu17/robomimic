@@ -99,9 +99,8 @@ class EnvRoboverse(EB.EnvBase):
         return self.get_observation(di)
 
     def reset_to(self, state):
-        raise Exception("not working!")
-        pass
-
+        #not working!
+        return
     #     """
     #     Reset to a specific simulator state.
     #
@@ -178,15 +177,16 @@ class EnvRoboverse(EB.EnvBase):
         """
         Get current environment simulator state as a dictionary. Should be compatible with @reset_to.
         """
-        p1 = self.env.env._p
-        base_po = []  # position and orientation of base for each body
-        base_v = []  # velocity of base for each body
-        joint_states = []  # joint states for each body
-        for i in range(p1.getNumBodies()):
-            base_po.append(p1.getBasePositionAndOrientation(i))
-            base_v.append(p1.getBaseVelocity(i))
-            joint_states.append([p1.getJointState(i, j) for j in range(p1.getNumJoints(i))])
-        return {"states" : (base_po, base_v, joint_states)}
+        return {}
+        # p1 = self.env.env._p
+        # base_po = []  # position and orientation of base for each body
+        # base_v = []  # velocity of base for each body
+        # joint_states = []  # joint states for each body
+        # for i in range(p1.getNumBodies()):
+        #     base_po.append(p1.getBasePositionAndOrientation(i))
+        #     base_v.append(p1.getBaseVelocity(i))
+        #     joint_states.append([p1.getJointState(i, j) for j in range(p1.getNumJoints(i))])
+        # return {"states" : (base_po, base_v, joint_states)}
 
     def set_whole_state(self, state):
         #TODO: parsing here allows for separate state inputs for robot, drawers, etc
@@ -224,11 +224,9 @@ class EnvRoboverse(EB.EnvBase):
         { str: bool } with at least a "task" key for the overall task success,
         and additional optional keys corresponding to other task criteria.
         """
-        succ = self.env._check_success()
-        if isinstance(succ, dict):
-            assert "task" in succ
-            return succ
-        return {"task": succ}
+        info = self.env.get_info()
+
+        return {"task" : info["target_place_success"]} #gets the target task
 
     @property
     def action_dimension(self):
