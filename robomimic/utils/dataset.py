@@ -215,7 +215,6 @@ class SequenceDataset(torch.utils.data.Dataset):
             self._demo_id_to_start_indices[ep] = self.total_num_sequences #keeping track of where things start
             self._demo_id_to_demo_length[ep] = demo_length
 
-
             num_sequences = demo_length
             # determine actual number of sequences taking into account whether to pad for frame_stack and seq_length
             if not self.pad_frame_stack:
@@ -244,6 +243,7 @@ class SequenceDataset(torch.utils.data.Dataset):
         print("precomputing demo embeddings!")
         embedding_list = list()
         label_list = list()
+        traj_label_list = list()
 
         counter = 0
         for demo in LogUtils.custom_tqdm(self.demos):
@@ -259,9 +259,11 @@ class SequenceDataset(torch.utils.data.Dataset):
             embed = classifier.compute_embeddings(all_demo_data)
             embedding_list.append(embed)
             label_list.extend([success for _ in range(embed.shape[0])])
+            traj_label_list.append(success)
 
         self.offline_embeddings = np.concatenate(embedding_list, axis = 0)
         self.label_list = np.array(label_list) #used mostly for plotting purposes
+        self.traj_label_list = traj_label_list
 
     @property
     def hdf5_file(self):
@@ -434,6 +436,14 @@ class SequenceDataset(torch.utils.data.Dataset):
                 self.hdf5_cache[ep]["attrs"]["model_file"] = hdf5_file["data/{}".format(ep)].attrs["model_file"]
         print(f"Now there are {len(self.hdf5_cache.keys())} demos in the buffer.")
 
+    def reweight_data_from_dataset(self, dataset, THRESHOLD = 0, epsilon = 0.01):
+        #this is when you have another weighted dataset and you want to compute the similiarity
+        similarity_matrix = dataset.offline_embeddings @ self.offline_embeddings.T  # intervention X offline
+
+        self._weight_list = np.mean(similarity_matrix, axis=0)
+        self._weight_list = (self._weight_list - np.min(self._weight_list)) / (
+                    np.max(self._weight_list) - np.min(self._weight_list))
+        self._weight_list[np.where(self._weight_list < THRESHOLD)] = 0  # hard cutoff
 
     def reweight_data(self, intervention_set, classifier, THRESHOLD = 0, epsilon = 0.01):
         print("Reweighting data!")
@@ -884,7 +894,17 @@ class SequenceDataset(torch.utils.data.Dataset):
 
     def get_weight_list(self):
         return self._weight_list
-        # return list(self._weight_list.values())
+
+    def get_traj_weights(self):
+        # returns a list of weights corresponding to each trajectory
+        weight_index = 0
+        weights_list = list()
+        for demo in self.demos:
+            demo_length = self._demo_id_to_demo_length[demo]
+            weights_list.append(self._weight_list[weight_index : weight_index + demo_length])
+            weight_index += demo_length
+
+        return weights_list
 
     def get_sample_distribution(self):
         return np.array(list(self._last_samples)), np.array(list(self._last_samples_identity))
