@@ -510,7 +510,7 @@ class TemporalEmbeddingWeighter(WeighingAlgo):
             copy_from = copy_from,
             modalities_to_copy = modalities_to_copy #  WILL NOT WORK WITH LOWDIM!!
         )
-
+        self.l2_lambda = 0.01
         self.nets = self.nets.float().to(self.device)
         self.loss = nn.BCEWithLogitsLoss() #pos_weight = 100 * torch.eye(100, device = self.device) + torch.ones((100,100), device = self.device)) #with logits, or without?
 
@@ -561,7 +561,8 @@ class TemporalEmbeddingWeighter(WeighingAlgo):
             info["accuracy"] = TensorUtils.detach(accuracy)
 
             # info["predictions"] = TensorUtils.detach(predictions)
-            info["losses"] = TensorUtils.detach(losses)
+            info["embedding_loss"] = TensorUtils.detach(losses["embedding_loss"])
+            info["repr_norm"] = TensorUtils.detach(losses["repr_norm"])
             info["product_matrix"] = torch.sigmoid(sim_matrix.detach()).cpu().numpy()
 
             if not validate:
@@ -610,7 +611,12 @@ class TemporalEmbeddingWeighter(WeighingAlgo):
         key = torch.eye(batch_size, device = similarity_matrix.device)
 
         # loss_fn =  nn.BCEWithLogitsLoss(pos_weight = 100 * torch.ones_like(key))
-        losses = self.loss(similarity_matrix, key)
+        embed_loss = self.loss(similarity_matrix, key)
+        regularizer =  (torch.norm(similarity_matrix) / batch_size) + (torch.norm(future_embedding) / batch_size)
+
+        losses = {}
+        losses["embedding_loss"] = embed_loss
+        losses["repr_norm"] = regularizer
 
         # print(losses)
         accuracy = OrderedDict()
@@ -636,7 +642,7 @@ class TemporalEmbeddingWeighter(WeighingAlgo):
         policy_grad_norms = TorchUtils.backprop_for_loss(
             net=self.nets,
             optim=self.optimizers["embedder"],
-            loss=losses,
+            loss=losses["embedding_loss"] + self.l2_lambda * losses["repr_norm"],
             # retain_graph = True, #because we need to optimize multiple times
         )
 
@@ -655,7 +661,8 @@ class TemporalEmbeddingWeighter(WeighingAlgo):
             loss_log (dict): name -> summary statistic
         """
         log = super(TemporalEmbeddingWeighter, self).log_info(info)
-        log["loss"] = info["losses"].item()
+        log["loss"] = info["embedding_loss"].item()
+        log["repr_norm"] = info["repr_norm"].item()
         log["accuracy"] = info["accuracy"]["maximums"].item()
         # log["on_diagonal_average"] = info["accuracy"]["on_diagonal"].item()
         # log["off_diagonal_average"] = info["accuracy"]["off_diagonal"].item()

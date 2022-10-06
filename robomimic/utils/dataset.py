@@ -436,13 +436,36 @@ class SequenceDataset(torch.utils.data.Dataset):
                 self.hdf5_cache[ep]["attrs"]["model_file"] = hdf5_file["data/{}".format(ep)].attrs["model_file"]
         print(f"Now there are {len(self.hdf5_cache.keys())} demos in the buffer.")
 
+
     def reweight_data_from_dataset(self, dataset, THRESHOLD = 0, epsilon = 0.01):
         #this is when you have another weighted dataset and you want to compute the similiarity
-        similarity_matrix = dataset.offline_embeddings @ self.offline_embeddings.T  # intervention X offline
 
-        self._weight_list = np.mean(similarity_matrix, axis=0)
+        # L2 DISTANCE
+        # l2_dist = np.linalg.norm(dataset.offline_embeddings[:, None, :] - self.offline_embeddings[None, :, :], axis=-1)
+        # self.weight_list = np.mean(l2_dist, axis = 0)
+        # self._weight_list = (self._weight_list - np.min(self._weight_list)) / (
+        #         np.max(self._weight_list) - np.min(self._weight_list))
+        # self._weight_list = np.ones_like(self._weight_list) - self._weight_list #invert the weights, because we're dealing with distance
+
+
+        # import ipdb
+        # ipdb.set_trace()
+        # COSINE SIMILARITY
+        # similarity_matrix = dataset.offline_embeddings @ self.offline_embeddings.T  # intervention X offline
+        # magnitude_dataset = np.linalg.norm(dataset.offline_embeddings, axis = 1, keepdims = True)
+        # magnitude_self = np.linalg.norm(self.offline_embeddings, axis = 1, keepdims = True)
+        # magnitude_matrix = magnitude_dataset @ magnitude_self.T
+        # cosine_sim = similarity_matrix / magnitude_matrix
+        # self._weight_list = 0.5 * (np.mean(cosine_sim, axis=0) + 1)
+
+        # MIN-MAX INNER PRODUCT SIMILARITY
+        similarity_matrix = dataset.offline_embeddings @ self.offline_embeddings.T  # intervention X offline
+        self._weight_list = np.mean(similarity_matrix, axis = 0)
         self._weight_list = (self._weight_list - np.min(self._weight_list)) / (
                     np.max(self._weight_list) - np.min(self._weight_list))
+        # import ipdb
+        # ipdb.set_trace()
+
         self._weight_list[np.where(self._weight_list < THRESHOLD)] = 0  # hard cutoff
 
     def reweight_data(self, intervention_set, classifier, THRESHOLD = 0, epsilon = 0.01):
