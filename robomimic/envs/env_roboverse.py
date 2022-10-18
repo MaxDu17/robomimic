@@ -58,7 +58,7 @@ class EnvRoboverse(EB.EnvBase):
 
         # update kwargs based on passed arguments
         update_kwargs = dict(
-            observation_mode="pixels" if use_image_obs else "noimage",
+            observation_mode="pixels_eye_hand" if use_image_obs else "noimage",
             control_mode = "discrete_gripper",
         )
 
@@ -171,6 +171,9 @@ class EnvRoboverse(EB.EnvBase):
         # ret["gripper_qpos"] = np.array(di["gripper_qpos"])
         # ret["object"] = np.array(di["object"])
         ret["state"] = np.array(di["state"])
+        if "image" in ret:
+            ret["image"] = np.flip(ret["image"], axis = 1).copy()
+
         return ret
 
     def get_state(self):

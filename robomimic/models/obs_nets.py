@@ -416,7 +416,6 @@ class ObservationGroupEncoder(Module):
                     ...
         """
         super(ObservationGroupEncoder, self).__init__()
-
         # type checking
         assert isinstance(observation_group_shapes, OrderedDict)
         assert np.all([isinstance(observation_group_shapes[k], OrderedDict) for k in observation_group_shapes])

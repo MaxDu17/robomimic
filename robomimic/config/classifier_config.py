@@ -306,6 +306,8 @@ class TemporalEmbeddingConfig(BaseConfig):
         self.train.actions = None #not used
         self.train.mode = None #not used
         self.train.same_traj = None #not used
+        self.train.p = 0.1
+
 
     def algo_config(self):
         """
@@ -316,7 +318,10 @@ class TemporalEmbeddingConfig(BaseConfig):
         """
 
         # optimization parameters
+        self.algo.l2 = 0.001
         self.algo.embedding_size = 10
+        self.algo.action_size = 7
+
         self.algo.optim_params.embedder.learning_rate.initial = 1e-4  # policy learning rate
         self.algo.optim_params.embedder.learning_rate.decay_factor = 0.1  # factor to decay LR by (if epoch schedule non-empty)
         self.algo.optim_params.embedder.learning_rate.epoch_schedule = []  # epochs where LR decay occurs

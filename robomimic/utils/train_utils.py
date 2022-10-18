@@ -183,6 +183,7 @@ def dataset_factory(config, obs_keys, filter_by_attribute=None, dataset_path=Non
         ds_kwargs["use_actions"] = config.train.actions
         dataset = DistanceClassifierDataset(**ds_kwargs)
     elif modifications == "temporal_embedding":
+        ds_kwargs["geometric_p"] = config.train.p
         dataset = TemporalEmbeddingDataset(**ds_kwargs)
     else:
         dataset = SequenceDataset(**ds_kwargs)
@@ -257,7 +258,14 @@ def run_rollout(
 
             # play action
             ob_dict, r, done, _ = env.step(ac)
-            # print(time.time() - beg)
+
+            # from matplotlib import pyplot as plt
+            # anchor = ob_dict["image"]
+            # fig, ax = plt.subplots()
+            # ax.imshow(np.transpose(anchor, (1, 2, 0)))
+            # plt.savefig("debugging/test_frame.png")
+            # import pdb
+            # pdb.set_trace()
 
             # render to screen
             if render:
@@ -621,6 +629,14 @@ def run_epoch(model, data_loader,epoch, validate=False, num_steps=None, second_d
             batch = next(data_loader_iter)
         timing_stats["Data_Loading"].append(time.time() - t)
 
+        # from matplotlib import pyplot as plt
+        # anchor = batch["obs"]["image"][0, 3].cpu().detach().numpy()
+        # fig, ax = plt.subplots()
+        # ax.imshow(np.transpose(anchor, (1, 2, 0)))
+        # plt.savefig("debugging/train.png")
+        # import pdb
+        # pdb.set_trace()
+
         # process batch for training
         t = time.time()
         input_batch = model.process_batch_for_training(batch)
@@ -664,7 +680,7 @@ def run_epoch(model, data_loader,epoch, validate=False, num_steps=None, second_d
         return step_log_all, info["predictions"]
 
     if return_matrix:
-        return step_log_all, info["product_matrix"] #take the last part of the vlaidation 
+        return step_log_all, info["product_matrix"] #take the last part of the vlaidation
 
     return step_log_all
 

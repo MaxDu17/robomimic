@@ -35,7 +35,7 @@ def create_hdf5_filter_key(hdf5_path, demo_keys, key_name):
     Args:
         hdf5_path (str): path to hdf5 file
         demo_keys ([str]): list of demonstration keys which should
-            correspond to this filter key. For example, ["demo_0", 
+            correspond to this filter key. For example, ["demo_0",
             "demo_1"].
         key_name (str): name of filter key to create
 
@@ -43,7 +43,7 @@ def create_hdf5_filter_key(hdf5_path, demo_keys, key_name):
         ep_lengths ([int]): list of episode lengths that corresponds to
             each demonstration in the new filter key
     """
-    f = h5py.File(hdf5_path, "a")  
+    f = h5py.File(hdf5_path, "a")
     demos = sorted(list(f["data"].keys()))
 
     # collect episode lengths for the keys of interest
@@ -143,7 +143,7 @@ def get_shape_metadata_from_dataset(dataset_path, all_obs_keys=None, verbose=Fal
 def load_dict_from_checkpoint(ckpt_path):
     """
     Load checkpoint dictionary from a checkpoint file.
-    
+
     Args:
         ckpt_path (str): Path to checkpoint file.
 
@@ -382,7 +382,7 @@ def policy_from_checkpoint(device=None, ckpt_path=None, ckpt_dict=None, verbose=
 
     if trainable:
         return model, ckpt_dict
-    
+
     model.set_eval()
     # we will only use a rollout policy if we don't intend on updating it
     model = RolloutPolicy(model, obs_normalization_stats=obs_normalization_stats)
@@ -428,8 +428,8 @@ def env_from_checkpoint(ckpt_path=None, ckpt_dict=None, env_name=None, render=Fa
 
     # create env from saved metadata
     env = EnvUtils.create_env_from_metadata(
-        env_meta=env_meta, 
-        render=render, 
+        env_meta=env_meta,
+        render=render,
         render_offscreen=render_offscreen,
         use_image_obs=shape_meta["use_images"],
     )

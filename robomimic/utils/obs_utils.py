@@ -249,6 +249,7 @@ def initialize_obs_utils_with_config(config):
     else:
         obs_modality_specs = [config.observation.modalities]
         obs_encoder_config = config.observation.encoder
+        
     initialize_obs_utils_with_obs_specs(obs_modality_specs=obs_modality_specs)
     initialize_default_obs_encoder(obs_encoder_config=obs_encoder_config)
 

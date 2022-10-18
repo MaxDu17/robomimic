@@ -441,30 +441,45 @@ class SequenceDataset(torch.utils.data.Dataset):
         #this is when you have another weighted dataset and you want to compute the similiarity
 
         # L2 DISTANCE
-        # l2_dist = np.linalg.norm(dataset.offline_embeddings[:, None, :] - self.offline_embeddings[None, :, :], axis=-1)
-        # self.weight_list = np.mean(l2_dist, axis = 0)
-        # self._weight_list = (self._weight_list - np.min(self._weight_list)) / (
-        #         np.max(self._weight_list) - np.min(self._weight_list))
-        # self._weight_list = np.ones_like(self._weight_list) - self._weight_list #invert the weights, because we're dealing with distance
+        with torch.no_grad():
+            demo_embeddings = torch.tensor(dataset.offline_embeddings) #examples X D
+            self_embeddings = torch.tensor(self.offline_embeddings) #examples X D
+            batch_l2_norm = torch.cdist(demo_embeddings, self_embeddings, p = 2.0).numpy()
+            self._weight_list = -np.min(batch_l2_norm, axis = 0)
+            self._weight_list = (self._weight_list - np.min(self._weight_list)) / (
+                        np.max(self._weight_list) - np.min(self._weight_list))
 
-
-        # import ipdb
-        # ipdb.set_trace()
         # COSINE SIMILARITY
         # similarity_matrix = dataset.offline_embeddings @ self.offline_embeddings.T  # intervention X offline
         # magnitude_dataset = np.linalg.norm(dataset.offline_embeddings, axis = 1, keepdims = True)
         # magnitude_self = np.linalg.norm(self.offline_embeddings, axis = 1, keepdims = True)
         # magnitude_matrix = magnitude_dataset @ magnitude_self.T
         # cosine_sim = similarity_matrix / magnitude_matrix
-        # self._weight_list = 0.5 * (np.mean(cosine_sim, axis=0) + 1)
+        # self._weight_list = 0.5 * (np.max(cosine_sim, axis=0) + 1)
 
         # MIN-MAX INNER PRODUCT SIMILARITY
-        similarity_matrix = dataset.offline_embeddings @ self.offline_embeddings.T  # intervention X offline
-        self._weight_list = np.mean(similarity_matrix, axis = 0)
-        self._weight_list = (self._weight_list - np.min(self._weight_list)) / (
-                    np.max(self._weight_list) - np.min(self._weight_list))
-        # import ipdb
-        # ipdb.set_trace()
+        # similarity_matrix = dataset.offline_embeddings @ self.offline_embeddings.T  # intervention X offline
+        # self._weight_list = np.max(similarity_matrix, axis = 0)
+        # # self._weight_list = 0.5 * np.tanh(self._weight_list / 2) + 1 #sigmoid
+        # self._weight_list = (self._weight_list - np.min(self._weight_list)) / (
+        #             np.max(self._weight_list) - np.min(self._weight_list))
+
+        # COMPUTE TEMPORAL ALIGNMENT
+        # self_traj_embeds_list = self.get_traj_embeds()
+        # demo_traj_embeds_list = dataset.get_traj_embeds()
+        # weights_list = list()
+        # from itertools import zip_longest
+        # for self_traj in LogUtils.custom_tqdm(self_traj_embeds_list):
+        #     same_step_list = list()
+        #     for demo_traj in demo_traj_embeds_list:
+        #         all_pairs_inner = self_traj @ demo_traj.T #per trajectory comparison
+        #         same_step_list.append(np.diagonal(all_pairs_inner))
+        #     average_weights = np.nanmean(np.array(list(zip_longest(*same_step_list)), dtype=np.float32), axis = 1)
+        #     padded_average_weights = np.pad(average_weights, (0, (self_traj.shape[0] - average_weights.shape[0])))
+        #     weights_list.append(padded_average_weights)
+        # self._weight_list = np.concatenate(weights_list)
+        # self._weight_list = (self._weight_list - np.min(self._weight_list)) / (
+        #             np.max(self._weight_list) - np.min(self._weight_list))
 
         self._weight_list[np.where(self._weight_list < THRESHOLD)] = 0  # hard cutoff
 
@@ -928,6 +943,17 @@ class SequenceDataset(torch.utils.data.Dataset):
             weight_index += demo_length
 
         return weights_list
+
+    def get_traj_embeds(self):
+        # returns a list of weights corresponding to each trajectory
+        weight_index = 0
+        embeds_list = list()
+        for demo in self.demos:
+            demo_length = self._demo_id_to_demo_length[demo]
+            embeds_list.append(self.offline_embeddings[weight_index : weight_index + demo_length])
+            weight_index += demo_length
+
+        return embeds_list
 
     def get_sample_distribution(self):
         return np.array(list(self._last_samples)), np.array(list(self._last_samples_identity))

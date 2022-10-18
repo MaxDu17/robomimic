@@ -268,7 +268,7 @@ class VanillaWeighter(WeighingAlgo):
         obs_dict_two = TensorUtils.to_tensor(obs_dict_two)
         obs_dict_two = TensorUtils.to_device(obs_dict_two, self.device)
         obs_dict_two = TensorUtils.to_float(obs_dict_two)
-        
+
         return self.nets["policy"](obs_dict_one, obs_dict_two)
 
 class ContrastiveWeighter(WeighingAlgo):
@@ -486,7 +486,11 @@ class TemporalEmbeddingWeighter(WeighingAlgo):
         observation_group_shapes = OrderedDict()
         observation_group_shapes["obs"] = OrderedDict(self.obs_shapes)
         observation_with_action = deepcopy(observation_group_shapes)
-        observation_with_action["obs"]["actions"] = [7,] #temp hardcoding
+        try: #DEPENDENCY ISSUE
+            observation_with_action["obs"]["actions"] = [self.algo_config.action_size,]
+        except:
+            observation_with_action["obs"]["actions"] = [7,] #temp hardcoding CAN CAUSE PROBLEMS
+
         copy_from = None
         modalities_to_copy = None
 
@@ -510,7 +514,11 @@ class TemporalEmbeddingWeighter(WeighingAlgo):
             copy_from = copy_from,
             modalities_to_copy = modalities_to_copy #  WILL NOT WORK WITH LOWDIM!!
         )
-        self.l2_lambda = 0.01
+        try:
+            self.l2_lambda = self.algo_config.l2
+        except:
+            self.l2_lambda = 0
+
         self.nets = self.nets.float().to(self.device)
         self.loss = nn.BCEWithLogitsLoss() #pos_weight = 100 * torch.eye(100, device = self.device) + torch.ones((100,100), device = self.device)) #with logits, or without?
 
@@ -554,7 +562,8 @@ class TemporalEmbeddingWeighter(WeighingAlgo):
         with TorchUtils.maybe_no_grad(no_grad=validate):
             # this just gets an empty dictionary
             info = super(TemporalEmbeddingWeighter, self).train_on_batch(batch, epoch, validate=validate)
-
+            # import ipdb
+            # ipdb.set_trace()
             embeddings = self._forward_training(batch)
 
             losses, accuracy, sim_matrix = self._compute_losses(embeddings)
@@ -607,7 +616,12 @@ class TemporalEmbeddingWeighter(WeighingAlgo):
         batch_size = current_embedding.shape[0]
         # batch x embed dim
 
-        similarity_matrix = current_embedding @ future_embedding.T
+        # NEW L2 DISTANCE
+        distance_matrix = torch.cdist(current_embedding, future_embedding, p = 2)
+        similarity_matrix = -distance_matrix
+
+        # OLD INNER PRODUCT
+        # similarity_matrix = current_embedding @ future_embedding.T
         key = torch.eye(batch_size, device = similarity_matrix.device)
 
         # loss_fn =  nn.BCEWithLogitsLoss(pos_weight = 100 * torch.ones_like(key))

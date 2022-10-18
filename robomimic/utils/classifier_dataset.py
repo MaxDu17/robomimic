@@ -171,6 +171,7 @@ class TemporalEmbeddingDataset(SequenceDataset):
                  priority=False,
                  weighting=False,
                  num_samples=None,
+                 geometric_p = 0.1
                  ):
         super(TemporalEmbeddingDataset, self).__init__(
             hdf5_path,
@@ -191,6 +192,7 @@ class TemporalEmbeddingDataset(SequenceDataset):
             weighting,
             num_samples,
         )
+        self.geometric_p = geometric_p
 
     # just overriding the sampling funcitonality
     def __getitem__(self, index):
@@ -210,8 +212,8 @@ class TemporalEmbeddingDataset(SequenceDataset):
 
         # second_index_in_demo = index_in_demo
 
-        # second_index_in_demo = min(viable_sample_size - 1, index_in_demo + 1)
-        second_index_in_demo = min(viable_sample_size - 1, np.random.geometric(0.1) + index_in_demo) #the s^+ is some steps in the future
+        # second_index_in_demo = min(viable_sample_size - 1, index_in_demo + 1) #SNITY CHECK
+        second_index_in_demo = min(viable_sample_size - 1, np.random.geometric(self.geometric_p) + index_in_demo) #the s^+ is some steps in the future
 
         data = {}
 
