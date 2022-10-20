@@ -127,7 +127,7 @@ class EnvRoboverse(EB.EnvBase):
     #         return self.get_observation()
     #     return None
 
-    def render(self, mode="rgb_array", height=None, width=None, camera_name="agentview"):
+    def render(self, mode="rgb_array", height=None, width=None, camera_name="agentview", eye_in_hand = False):
         """
         Render from simulation to either an on-screen window or off-screen to RGB array.
 
@@ -139,7 +139,7 @@ class EnvRoboverse(EB.EnvBase):
         """
         assert mode != "human"
         if mode == "rgb_array":
-            return self.env.render_obs(res = height)
+            return self.env.render_obs(res = height, eye_in_hand = eye_in_hand)
         else:
             raise NotImplementedError("mode={} is not implemented".format(mode))
 

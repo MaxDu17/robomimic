@@ -508,11 +508,22 @@ class SequenceDataset(torch.utils.data.Dataset):
         interventions = ObsUtils.process_obs_dict(interventions)  # normalize and change shapes
 
         intervention_embeddings = classifier.compute_embeddings(interventions) #interventions X embedding matrix
-        similarity_matrix = intervention_embeddings @ self.offline_embeddings.T # intervention X offline
 
-        self._weight_list = np.mean(similarity_matrix, axis = 0)
-        self._weight_list = (self._weight_list - np.min(self._weight_list)) / (np.max(self._weight_list) - np.min(self._weight_list))
-        self._weight_list[np.where(self._weight_list < THRESHOLD)] = 0 #hard cutoff
+        with torch.no_grad():
+            intervention_embeddings = torch.tensor(intervention_embeddings) #examples X D
+            self_embeddings = torch.tensor(self.offline_embeddings) #examples X D
+            batch_l2_norm = torch.cdist(intervention_embeddings, self_embeddings, p = 2.0).numpy()
+
+        self._weight_list = -np.min(batch_l2_norm, axis = 0)
+        self._weight_list = (self._weight_list - np.min(self._weight_list)) / (
+                    np.max(self._weight_list) - np.min(self._weight_list))
+
+        self._weight_list[np.where(self._weight_list < THRESHOLD)] = 0  # hard cutoff
+        # similarity_matrix = intervention_embeddings @ self.offline_embeddings.T # intervention X offline
+        #
+        # self._weight_list = np.mean(similarity_matrix, axis = 0)
+        # self._weight_list = (self._weight_list - np.min(self._weight_list)) / (np.max(self._weight_list) - np.min(self._weight_list))
+
 
     # def reweight_data(self, intervention_set, classifier, THRESHOLD = 0, epsilon = 0.01):
     #     """
@@ -958,3 +969,5 @@ class SequenceDataset(torch.utils.data.Dataset):
     def get_sample_distribution(self):
         return np.array(list(self._last_samples)), np.array(list(self._last_samples_identity))
 
+    def get_active_weight_proportion(self):
+        return np.mean(self._weight_list > 0)
