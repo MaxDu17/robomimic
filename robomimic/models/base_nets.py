@@ -171,6 +171,7 @@ class MLP(Module):
         activation=nn.ReLU,
         dropouts=None,
         normalization=False,
+        batch_norm = False,
         output_activation=None,
     ):
         """
@@ -197,6 +198,7 @@ class MLP(Module):
         super(MLP, self).__init__()
         layers = []
         dim = input_dim
+        assert not(normalization and batch_norm)
         if layer_func_kwargs is None:
             layer_func_kwargs = dict()
         if dropouts is not None:
@@ -205,6 +207,8 @@ class MLP(Module):
             layers.append(layer_func(dim, l, **layer_func_kwargs))
             if normalization:
                 layers.append(nn.LayerNorm(l))
+            if batch_norm:
+                layers.append(nn.BatchNorm1d(l))
             layers.append(activation())
             if dropouts is not None and dropouts[i] > 0.:
                 layers.append(nn.Dropout(dropouts[i]))

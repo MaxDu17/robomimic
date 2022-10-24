@@ -84,7 +84,6 @@ def obs_encoder_factory(
         randomizer = None if enc_kwargs["obs_randomizer_class"] is None else \
             ObsUtils.OBS_RANDOMIZERS[enc_kwargs["obs_randomizer_class"]](**enc_kwargs["obs_randomizer_kwargs"])
 
-
         if nets_to_share is not None and k in nets_to_share:
             enc.register_obs_key(
                 name=k,
@@ -238,6 +237,7 @@ class ObservationEncoder(Module):
 
         # process modalities by order given by @self.obs_shapes
         feats = []
+
         for k in self.obs_shapes:
             x = obs_dict[k]
             # x = self.bn[k](x)
@@ -512,10 +512,14 @@ class MIMO_MLP(Module):
         activation=nn.ReLU,
         encoder_kwargs=None,
         copy_from = None,
-        modalities_to_copy = None
+        modalities_to_copy = None,
+        split_trunk_at = 0,
+        copy_trunk_from = None,
+        late_fusion_dict ={}
     ):
         """
         Args:
+            split_trunk (int): where we split the final encoder. 0 default means no splitting
             copy_from (MIMO_MLP): another MLP module to copy weights from
             modalities_to_copy (list): modalities from that MLP module to copy from s
             input_obs_group_shapes (OrderedDict): a dictionary of dictionaries.
@@ -554,8 +558,15 @@ class MIMO_MLP(Module):
         assert isinstance(input_obs_group_shapes, OrderedDict)
         assert np.all([isinstance(input_obs_group_shapes[k], OrderedDict) for k in input_obs_group_shapes])
         assert isinstance(output_shapes, OrderedDict)
+        assert split_trunk_at <= len(layer_dims)
 
         self.input_obs_group_shapes = input_obs_group_shapes
+
+        self.late_fusion_addition = 0
+        self.late_fusion_dict = late_fusion_dict
+        for value in late_fusion_dict.values():
+            self.late_fusion_addition += value[0]
+
         self.output_shapes = output_shapes
 
         self.nets = nn.ModuleDict()
@@ -577,14 +588,40 @@ class MIMO_MLP(Module):
         mlp_input_dim = self.nets["encoder"].output_shape()[0]
 
         # intermediate MLP layers
-        self.nets["mlp"] = MLP(
-            input_dim=mlp_input_dim,
-            output_dim=layer_dims[-1],
-            layer_dims=layer_dims[:-1],
-            layer_func=layer_func,
-            activation=activation,
-            output_activation=activation, # make sure non-linearity is applied before decoder
-        )
+        if split_trunk_at > 0:
+            if copy_trunk_from is not None:
+                print("tying leaf!")
+                self.nets["leaf"] = copy_trunk_from
+            else:
+                self.nets["leaf"] = MLP(
+                    input_dim=mlp_input_dim,
+                    output_dim=layer_dims[split_trunk_at - 1],
+                    layer_dims=layer_dims[0 : split_trunk_at - 1],
+                    layer_func=layer_func,
+                    activation=activation,
+                    output_activation=activation,  # make sure non-linearity is applied before decoder
+                    batch_norm=False
+                )
+
+            self.nets["mlp"] = MLP(
+                input_dim=layer_dims[split_trunk_at - 1] + self.late_fusion_addition,
+                output_dim=layer_dims[-1],
+                layer_dims=layer_dims[split_trunk_at:-1],
+                layer_func=layer_func,
+                activation=activation,
+                output_activation=activation, # make sure non-linearity is applied before decoder
+                batch_norm = False
+            )
+        else:
+            self.nets["mlp"] = MLP(
+                input_dim=mlp_input_dim + self.late_fusion_addition,
+                output_dim=layer_dims[-1],
+                layer_dims=layer_dims[:-1],
+                layer_func=layer_func,
+                activation=activation,
+                output_activation=activation, # make sure non-linearity is applied before decoder
+                normalization = False
+            )
 
         # decoder for output modalities
         self.nets["decoder"] = ObservationDecoder(
@@ -614,7 +651,22 @@ class MIMO_MLP(Module):
                 to @self.output_shapes
         """
         enc_outputs = self.nets["encoder"](**inputs)
-        mlp_out = self.nets["mlp"](enc_outputs)
+        if "leaf" in self.nets:
+            leaf_outputs = self.nets["leaf"](enc_outputs)
+            if self.late_fusion_addition > 0:
+                to_stack = [leaf_outputs]
+                for modality in self.late_fusion_dict.keys():
+                    to_stack.append(inputs["obs"][modality])
+                leaf_outputs = torch.cat(to_stack, dim = 1)
+            mlp_out = self.nets["mlp"](leaf_outputs)
+        else:
+            if self.late_fusion_addition > 0:
+                to_stack = [enc_outputs]
+                for modality in self.late_fusion_dict.keys():
+                    to_stack.append(inputs["obs"][modality])
+                enc_outputs = torch.cat(to_stack, dim=1)
+            mlp_out = self.nets["mlp"](enc_outputs)
+
         return self.nets["decoder"](mlp_out)
 
     def _to_string(self):
@@ -631,6 +683,8 @@ class MIMO_MLP(Module):
         if self._to_string() != '':
             msg += textwrap.indent("\n" + self._to_string() + "\n", indent)
         msg += textwrap.indent("\nencoder={}".format(self.nets["encoder"]), indent)
+        if "leaf" in self.nets:
+            msg += textwrap.indent("\n\nmlp={}".format(self.nets["leaf"]), indent)
         msg += textwrap.indent("\n\nmlp={}".format(self.nets["mlp"]), indent)
         msg += textwrap.indent("\n\ndecoder={}".format(self.nets["decoder"]), indent)
         msg = header + '(' + msg + '\n)'

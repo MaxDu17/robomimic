@@ -486,20 +486,27 @@ class TemporalEmbeddingWeighter(WeighingAlgo):
         observation_group_shapes = OrderedDict()
         observation_group_shapes["obs"] = OrderedDict(self.obs_shapes)
         observation_with_action = deepcopy(observation_group_shapes)
-        try: #DEPENDENCY ISSUE
-            observation_with_action["obs"]["actions"] = [self.algo_config.action_size,]
+        late_fusion_dict = {}
+        try:
+            late_fusion_dict["actions"] = [self.algo_config.action_size,]
         except:
-            observation_with_action["obs"]["actions"] = [7,] #temp hardcoding CAN CAUSE PROBLEMS
+            late_fusion_dict["actions"] = [7, ]
+
+            # try: #DEPENDENCY ISSUE
+        #     observation_with_action["obs"]["actions"] = [self.algo_config.action_size,]
+        # except:
+        #     observation_with_action["obs"]["actions"] = [7,] #temp hardcoding CAN CAUSE PROBLEMS
 
         copy_from = None
         modalities_to_copy = None
 
-        #TODO: verify that it is taking all modalities
         self.nets["embedder"] = MIMO_MLP(
-            input_obs_group_shapes=observation_with_action,
+            input_obs_group_shapes=observation_group_shapes,
             layer_dims=self.algo_config.actor_layer_dims,
             output_shapes=OrderedDict(value=(self.algo_config.embedding_size,)),
             encoder_kwargs=ObsUtils.obs_encoder_kwargs_from_config(self.obs_config.encoder),
+            split_trunk_at=self.algo_config.split_trunk_at,
+            late_fusion_dict = late_fusion_dict
         )
 
         if "agentview_image" in observation_group_shapes["obs"] or "robot0_eye_in_hand_image" in observation_group_shapes["obs"]:
@@ -512,8 +519,11 @@ class TemporalEmbeddingWeighter(WeighingAlgo):
             output_shapes=OrderedDict(value=(self.algo_config.embedding_size,)),
             encoder_kwargs=ObsUtils.obs_encoder_kwargs_from_config(self.obs_config.encoder),
             copy_from = copy_from,
-            modalities_to_copy = modalities_to_copy #  WILL NOT WORK WITH LOWDIM!!
+            modalities_to_copy = modalities_to_copy, # only for images
+            split_trunk_at = self.algo_config.split_trunk_at,
+            copy_trunk_from = self.nets["embedder"].nets["leaf"] if self.algo_config.split_trunk_at > 0 else None,
         )
+
         try:
             self.l2_lambda = self.algo_config.l2
         except:
@@ -595,6 +605,7 @@ class TemporalEmbeddingWeighter(WeighingAlgo):
         combined_data = {}
 
         current_embedding = self.nets["embedder"](obs=batch["anchor"])["value"]
+
         future_embedding = self.nets["future"](obs=batch["future"])["value"]
         return current_embedding, future_embedding
 
