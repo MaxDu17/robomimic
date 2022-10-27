@@ -509,6 +509,7 @@ class SequenceDataset(torch.utils.data.Dataset):
 
         intervention_embeddings = classifier.compute_embeddings(interventions) #interventions X embedding matrix
 
+        # L2 DISTANCE
         with torch.no_grad():
             intervention_embeddings = torch.tensor(intervention_embeddings) #examples X D
             self_embeddings = torch.tensor(self.offline_embeddings) #examples X D
@@ -519,9 +520,10 @@ class SequenceDataset(torch.utils.data.Dataset):
                     np.max(self._weight_list) - np.min(self._weight_list))
 
         self._weight_list[np.where(self._weight_list < THRESHOLD)] = 0  # hard cutoff
+
+        # DOT PRODUCT DISTANCE
         # similarity_matrix = intervention_embeddings @ self.offline_embeddings.T # intervention X offline
-        #
-        # self._weight_list = np.mean(similarity_matrix, axis = 0)
+        # self._weight_list = np.max(similarity_matrix, axis = 0)
         # self._weight_list = (self._weight_list - np.min(self._weight_list)) / (np.max(self._weight_list) - np.min(self._weight_list))
 
 

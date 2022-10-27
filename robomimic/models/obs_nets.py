@@ -600,7 +600,7 @@ class MIMO_MLP(Module):
                     layer_func=layer_func,
                     activation=activation,
                     output_activation=activation,  # make sure non-linearity is applied before decoder
-                    batch_norm=False
+                    batch_norm=True
                 )
 
             self.nets["mlp"] = MLP(
@@ -610,7 +610,7 @@ class MIMO_MLP(Module):
                 layer_func=layer_func,
                 activation=activation,
                 output_activation=activation, # make sure non-linearity is applied before decoder
-                batch_norm = False
+                batch_norm = True
             )
         else:
             self.nets["mlp"] = MLP(

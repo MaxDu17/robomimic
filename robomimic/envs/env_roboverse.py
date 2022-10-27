@@ -138,6 +138,7 @@ class EnvRoboverse(EB.EnvBase):
             camera_name (str): camera name to use for rendering
         """
         assert mode != "human"
+        #TODO: IMPLEMENT EYE IN HAND HERE
         if mode == "rgb_array":
             return self.env.render_obs(res = height, eye_in_hand = eye_in_hand)
         else:
@@ -154,16 +155,24 @@ class EnvRoboverse(EB.EnvBase):
             di (dict): current raw observation dictionary from robosuite to wrap and provide
                 as a dictionary. If not provided, will be queried from robosuite.
         """
-        di = self.env.get_observation()
+        # di = self.env.get_observation()
         if di is None:
             raise Exception("not implemented!")
             di = self.env._get_observations(force_update=True) if self._is_v1 else self.env._get_observation()
         ret = {}
+
+
         for k in di:
-            if (k in ObsUtils.OBS_KEYS_TO_MODALITIES) and ObsUtils.key_is_obs_modality(key=k, obs_modality="rgb"):
-                ret[k] = di[k][::-1]
+            k_label = k
+            if k == "image":
+                k_label = "agentview_image"
+            elif k == "image_eye_in_hand":
+                k_label = "robot0_eye_in_hand_image"
+
+            if (k_label in ObsUtils.OBS_KEYS_TO_MODALITIES) and ObsUtils.key_is_obs_modality(key=k_label, obs_modality="rgb"):
+                ret[k_label] = di[k][::-1] #extract with original keys
                 if self.postprocess_visual_obs:
-                    ret[k] = ObsUtils.process_obs(obs=ret[k], obs_key=k)
+                    ret[k_label] = ObsUtils.process_obs(obs=ret[k_label], obs_key=k_label)
 
         # ret["proprio"] = np.array(di["robot_state"])
         # ret["eef_pos"] = np.array(di["eef_pos"])
@@ -171,8 +180,13 @@ class EnvRoboverse(EB.EnvBase):
         # ret["gripper_qpos"] = np.array(di["gripper_qpos"])
         # ret["object"] = np.array(di["object"])
         ret["state"] = np.array(di["state"])
-        if "image" in ret:
-            ret["image"] = np.flip(ret["image"], axis = 1).copy()
+
+        # quirk in the environment
+        if "agentview_image" in ret:
+            ret["agentview_image"] = np.flip(ret["agentview_image"], axis = 1).copy()
+
+        if "robot0_eye_in_hand_image" in ret:
+            ret["robot0_eye_in_hand_image"] = np.flip(ret["robot0_eye_in_hand_image"], axis = 1).copy()
 
         return ret
 

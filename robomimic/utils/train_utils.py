@@ -259,11 +259,14 @@ def run_rollout(
             # play action
             ob_dict, r, done, _ = env.step(ac)
 
+            #FOR DEBUGGING
             # from matplotlib import pyplot as plt
-            # anchor = ob_dict["image"]
+            # anchor = ob_dict["robot0_eye_in_hand_image"]
+            # # anchor = ob_dict["agentview_image"]
             # fig, ax = plt.subplots()
             # ax.imshow(np.transpose(anchor, (1, 2, 0)))
             # plt.savefig("debugging/test_frame.png")
+            # print(np.mean(anchor)) #to see if things are normalized 0-1 or to 0-255
             # import pdb
             # pdb.set_trace()
 
@@ -629,11 +632,13 @@ def run_epoch(model, data_loader,epoch, validate=False, num_steps=None, second_d
             batch = next(data_loader_iter)
         timing_stats["Data_Loading"].append(time.time() - t)
 
-        # from matplotlib import pyplot as plt
-        # anchor = batch["obs"]["image"][0, 3].cpu().detach().numpy()
+        from matplotlib import pyplot as plt
+        # anchor = batch["obs"]["agentview_image"][0, 3].cpu().detach().numpy()
+        # anchor = batch["obs"]["robot0_eye_in_hand_image"][0, 3].cpu().detach().numpy()
         # fig, ax = plt.subplots()
         # ax.imshow(np.transpose(anchor, (1, 2, 0)))
         # plt.savefig("debugging/train.png")
+        # print(np.mean(anchor))  # to see if things are normalized 0-1 or to 0-255
         # import pdb
         # pdb.set_trace()
 
