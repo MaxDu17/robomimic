@@ -441,13 +441,13 @@ class SequenceDataset(torch.utils.data.Dataset):
         #this is when you have another weighted dataset and you want to compute the similiarity
 
         # L2 DISTANCE
-        with torch.no_grad():
-            demo_embeddings = torch.tensor(dataset.offline_embeddings) #examples X D
-            self_embeddings = torch.tensor(self.offline_embeddings) #examples X D
-            batch_l2_norm = torch.cdist(demo_embeddings, self_embeddings, p = 2.0).numpy()
-            self._weight_list = -np.min(batch_l2_norm, axis = 0)
-            self._weight_list = (self._weight_list - np.min(self._weight_list)) / (
-                        np.max(self._weight_list) - np.min(self._weight_list))
+        # with torch.no_grad():
+        #     demo_embeddings = torch.tensor(dataset.offline_embeddings) #examples X D
+        #     self_embeddings = torch.tensor(self.offline_embeddings) #examples X D
+        #     batch_l2_norm = torch.cdist(demo_embeddings, self_embeddings, p = 2.0).numpy()
+        #     self._weight_list = -np.min(batch_l2_norm, axis = 0)
+        #     self._weight_list = (self._weight_list - np.min(self._weight_list)) / (
+        #                 np.max(self._weight_list) - np.min(self._weight_list))
 
         # COSINE SIMILARITY
         # similarity_matrix = dataset.offline_embeddings @ self.offline_embeddings.T  # intervention X offline
@@ -458,11 +458,11 @@ class SequenceDataset(torch.utils.data.Dataset):
         # self._weight_list = 0.5 * (np.max(cosine_sim, axis=0) + 1)
 
         # MIN-MAX INNER PRODUCT SIMILARITY
-        # similarity_matrix = dataset.offline_embeddings @ self.offline_embeddings.T  # intervention X offline
-        # self._weight_list = np.max(similarity_matrix, axis = 0)
-        # # self._weight_list = 0.5 * np.tanh(self._weight_list / 2) + 1 #sigmoid
-        # self._weight_list = (self._weight_list - np.min(self._weight_list)) / (
-        #             np.max(self._weight_list) - np.min(self._weight_list))
+        similarity_matrix = dataset.offline_embeddings @ self.offline_embeddings.T  # intervention X offline
+        self._weight_list = np.max(similarity_matrix, axis = 0)
+        # self._weight_list = 0.5 * np.tanh(self._weight_list / 2) + 1 #sigmoid
+        self._weight_list = (self._weight_list - np.min(self._weight_list)) / (
+                    np.max(self._weight_list) - np.min(self._weight_list))
 
         # COMPUTE TEMPORAL ALIGNMENT
         # self_traj_embeds_list = self.get_traj_embeds()
