@@ -1027,7 +1027,6 @@ class VAE(torch.nn.Module):
                 mean=(self.latent_dim,), 
                 logvar=(self.latent_dim,),
             )
-
         self.nets["encoder"] = MIMO_MLP(
             input_obs_group_shapes=encoder_obs_group_shapes,
             output_shapes=encoder_output_shapes, 
@@ -1113,11 +1112,12 @@ class VAE(torch.nn.Module):
         Returns:
             posterior params (dict): dictionary with posterior parameters
         """
-        return self.nets["encoder"](
+        encoded = self.nets["encoder"](
             input=inputs,
             condition=conditions,
             goal=goals,
         )
+        return encoded
 
     def reparameterize(self, posterior_params):
         """
@@ -1328,6 +1328,7 @@ class VAE(torch.nn.Module):
         # Notice that when Y is the empty set, this reduces to a normal VAE.
 
         # mu, logvar <- Enc(X, Y)
+
         posterior_params = self.encode(
             inputs=inputs, 
             conditions=conditions,

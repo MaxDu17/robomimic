@@ -519,8 +519,12 @@ class SequenceDataset(torch.utils.data.Dataset):
         self._weight_list = (self._weight_list - np.min(self._weight_list)) / (
                     np.max(self._weight_list) - np.min(self._weight_list))
 
-        self._weight_list[np.where(self._weight_list < THRESHOLD)] = 0  # hard cutoff
+        mask = self._weight_list < THRESHOLD
+        self._weight_list[np.where(mask)] = 0  # hard cutoff
+        self._weight_list[np.where(np.logical_not(mask))] = 1  # hard cutoff, essentially get a binary weight
 
+        # import ipdb
+        # ipdb.set_trace()
         # DOT PRODUCT DISTANCE
         # similarity_matrix = intervention_embeddings @ self.offline_embeddings.T # intervention X offline
         # self._weight_list = np.max(similarity_matrix, axis = 0)

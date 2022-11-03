@@ -2,6 +2,7 @@ from collections import OrderedDict
 
 import robomimic.models.base_nets as BaseNets
 import robomimic.models.weighter_nets as WeighterNet
+import robomimic.models.vae_nets as VAENet
 from robomimic.models.obs_nets import MIMO_MLP, RNN_MIMO_MLP
 from robomimic.algo import register_algo_factory_func, WeighingAlgo
 
@@ -45,6 +46,154 @@ def algo_config_to_class(algo_config = None):
     Yields the class for the weighing algorithm. Can be expanded to accomodate more fancier classifiers
     """
     return TemporalEmbeddingWeighter, {}
+
+@register_algo_factory_func("vae_embedding")
+def algo_config_to_class(algo_config = None):
+    """
+    Yields the class for the weighing algorithm. Can be expanded to accomodate more fancier classifiers
+    """
+    return VAE_KNN, {}
+
+class VAE_KNN(WeighingAlgo):
+    def _create_networks(self):
+        #make VAE here
+        observation_group_shapes = OrderedDict()
+        observation_group_shapes["obs"] = OrderedDict(self.obs_shapes)
+        observation_with_action = deepcopy(observation_group_shapes)
+        observation_with_action["obs"]["actions"] = [self.algo_config.action_size, ]
+
+        self.nets["VAE"] = VAENet.VAE(input_shapes=observation_with_action["obs"],
+                              output_shapes=observation_with_action["obs"],
+                              device = self.device,
+                              **VAENet.vae_args_from_config(self.algo_config.vae))
+
+        # if "agentview_image" in observation_group_shapes["obs"] or "robot0_eye_in_hand_image" in \
+        #         observation_group_shapes["obs"]:
+        #     # right now, this is kinda janky implementation of VAE image encoders, but it is robust to any lowdim inputs
+        #     shapes = {}
+        #     shapes["agentview_image"] = observation_group_shapes["obs"]["agentview_image"]
+        #     shapes["robot0_eye_in_hand_image"] = observation_group_shapes["obs"]["robot0_eye_in_hand_image"]
+        #
+        #     self.VAE = VAENet.VAE(input_shapes = shapes,
+        #                           output_shapes = shapes,
+        #                           **VAENet.vae_args_from_config(self.algo_config.vae))
+        #
+        #     observation_group_shapes["obs"].pop("agentview_image")
+        #     observation_group_shapes["obs"].pop("robot0_eye_in_hand_image")
+        self.nets = self.nets.float().to(self.device)
+
+    def process_batch_for_training(self, batch):
+        """
+        Processes input batch from a data loader to filter out
+        relevant information and prepare the batch for training.
+
+        Args:
+            batch (dict): dictionary with torch.Tensors sampled
+                from a data loader
+
+        Returns:
+            input_batch (dict): processed and filtered batch that
+                will be used for training
+        """
+        input_batch = {k: batch["obs"][k][:, 0, :] for k in batch["obs"]}
+        input_batch["actions"] = batch["actions"][:, 0, :] # adding the actions as an input
+
+        return TensorUtils.to_device(TensorUtils.to_float(input_batch), self.device)
+
+    def train_on_batch(self, batch, epoch, validate=False):
+        """
+        Training on a single batch of data.
+
+        Args:
+            batch (dict): tuple of dictionaries with torch.Tensors sampled
+                from a data loader and filtered by @process_batch_for_training
+
+            epoch (int): epoch number - required by some Algos that need
+                to perform staged training and early stopping
+
+            validate (bool): if True, don't perform any learning updates.
+
+        Returns:
+            info (dict): dictionary of relevant inputs, outputs, and losses
+                that might be relevant for logging
+        """
+
+        with TorchUtils.maybe_no_grad(no_grad=validate):
+            # this just gets an empty dictionary
+            info = super(VAE_KNN, self).train_on_batch(batch, epoch, validate=validate)
+            info_dict = self.nets["VAE"](inputs = batch, outputs = batch)
+            losses = info_dict["reconstruction_loss"] + self.algo_config.vae.kl_weight * info_dict["kl_loss"]
+
+            info["reconstruction_loss"] = TensorUtils.detach(info_dict["reconstruction_loss"])
+            info["reconstruction"] = TensorUtils.detach(info_dict["decoder_outputs"])
+            info["kl_loss"] = TensorUtils.detach(info_dict["kl_loss"])
+            info["loss"] = TensorUtils.detach(losses)
+
+            if not validate:
+                step_info = self._train_step(losses)
+                info.update(step_info)
+
+        return info
+
+    def _train_step(self, losses):
+        """
+        Internal helper function for weighting algo class. Perform backpropagation on the
+        loss tensors in @losses to update networks.
+
+        Args:
+            losses (dict): dictionary of losses computed over the batch, from @_compute_losses
+        """
+
+        # gradient step
+        info = OrderedDict()
+        torch.autograd.set_detect_anomaly(True)
+        policy_grad_norms = TorchUtils.backprop_for_loss(
+            net=self.nets["VAE"],
+            optim=self.optimizers["VAE"],
+            loss=losses,
+            # retain_graph = True, #because we need to optimize multiple times
+        )
+
+        info["policy_grad_norms"] = policy_grad_norms
+        return info
+
+    def log_info(self, info):
+        """
+        Process info dictionary from @train_on_batch to summarize
+        information to pass to tensorboard for logging.
+
+        Args:
+            info (dict): dictionary of info
+
+        Returns:
+            loss_log (dict): name -> summary statistic
+        """
+
+
+        log = super(VAE_KNN, self).log_info(info)
+        log["loss"] = info["loss"].item()
+        log["reconstruction_loss"] = info["reconstruction_loss"].item()
+        log["kl_loss"] = info["kl_loss"].item()
+
+        # log["repr_norm"] = info["repr_norm"].item()
+        # log["accuracy"] = info["accuracy"]["maximums"].item()
+        # log["on_diagonal_average"] = info["accuracy"]["on_diagonal"].item()
+        # log["off_diagonal_average"] = info["accuracy"]["off_diagonal"].item()
+
+        if "policy_grad_norms" in info:
+            log["Policy_Grad_Norms"] = info["policy_grad_norms"]
+
+        return log
+
+
+    def compute_embeddings(self, obs_dict):
+        assert not self.nets.training
+        with torch.no_grad():  # make sure we aren't saving the computation graphs, or we can have a memory leak
+            encoder_params = self.nets["VAE"].encode(obs_dict)
+            embed = self.nets["VAE"].reparameterize(encoder_params).detach().cpu().numpy()
+        return embed
+
+
 class TemporalEmbeddingWeighter(WeighingAlgo):
     """
     A classification model
@@ -149,8 +298,7 @@ class TemporalEmbeddingWeighter(WeighingAlgo):
         with TorchUtils.maybe_no_grad(no_grad=validate):
             # this just gets an empty dictionary
             info = super(TemporalEmbeddingWeighter, self).train_on_batch(batch, epoch, validate=validate)
-            # import ipdb
-            # ipdb.set_trace()
+
             embeddings = self._forward_training(batch)
 
             losses, accuracy, sim_matrix = self._compute_losses(embeddings)

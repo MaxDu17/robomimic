@@ -284,7 +284,13 @@ def run_rollout(
             # visualization
             if video_writer is not None:
                 if video_count % video_skip == 0:
-                    video_img = env.render(mode="rgb_array", height=256, width=256)
+                    agentview = env.render(mode="rgb_array", height=256, width=256)
+                    # try adding an eye in hand image to help with diagnostics
+                    try:
+                        eye_in_hand = env.render(mode="rgb_array", height=256, width=256, camera_name="robot0_eye_in_hand_image")
+                        video_img = np.concatenate((agentview, eye_in_hand), axis=0)
+                    except:
+                        video_img = agentview
                     video_writer.append_data(video_img)
 
                 video_count += 1
@@ -570,7 +576,8 @@ def run_epoch(model, data_loader,epoch, validate=False, num_steps=None, second_d
               stopping = "step",
               stopping_norm = 5000000,
               return_predictions = False,
-              return_matrix = False):
+              return_matrix = False,
+              return_reconstruction = False):
     """
     Run an epoch of training or validation.
 
@@ -632,7 +639,7 @@ def run_epoch(model, data_loader,epoch, validate=False, num_steps=None, second_d
             batch = next(data_loader_iter)
         timing_stats["Data_Loading"].append(time.time() - t)
 
-        from matplotlib import pyplot as plt
+        # from matplotlib import pyplot as plt
         # anchor = batch["obs"]["agentview_image"][0, 3].cpu().detach().numpy()
         # anchor = batch["obs"]["robot0_eye_in_hand_image"][0, 3].cpu().detach().numpy()
         # fig, ax = plt.subplots()
@@ -687,6 +694,16 @@ def run_epoch(model, data_loader,epoch, validate=False, num_steps=None, second_d
     if return_matrix:
         return step_log_all, info["product_matrix"] #take the last part of the vlaidation
 
+    if return_reconstruction:
+        if "agentview_image" in batch["obs"]:
+            # select a random image
+            selected_image =  batch["obs"]["agentview_image"][10][0].detach().cpu().numpy()
+            reconstructed_selected_image = info["reconstruction"]["agentview_image"][10].detach().cpu().numpy()
+
+            return step_log_all, np.concatenate((np.transpose(selected_image, (1, 2, 0)), np.transpose(reconstructed_selected_image, (1, 2, 0))), axis = 0)
+        else:
+            return step_log_all, np.zeros((20, 20)) #dummy return for lowdim
+        
     return step_log_all
 
 
