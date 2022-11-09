@@ -699,11 +699,19 @@ def run_epoch(model, data_loader,epoch, validate=False, num_steps=None, second_d
             # select a random image
             selected_image =  batch["obs"]["agentview_image"][10][0].detach().cpu().numpy()
             reconstructed_selected_image = info["reconstruction"]["agentview_image"][10].detach().cpu().numpy()
+            concat_image = np.concatenate((np.transpose(selected_image, (1, 2, 0)),
+                                               np.transpose(reconstructed_selected_image, (1, 2, 0))), axis = 0)
+            if "robot0_eye_in_hand_image" in batch["obs"]:
+                selected_image = batch["obs"]["robot0_eye_in_hand_image"][10][0].detach().cpu().numpy()
+                reconstructed_selected_image = info["reconstruction"]["robot0_eye_in_hand_image"][10].detach().cpu().numpy()
+                concat_eye_in_hand = np.concatenate(
+                    (np.transpose(selected_image, (1, 2, 0)), np.transpose(reconstructed_selected_image, (1, 2, 0))), axis=0)
+                concat_image = np.concatenate((concat_image, concat_eye_in_hand), axis = 1)
 
-            return step_log_all, np.concatenate((np.transpose(selected_image, (1, 2, 0)), np.transpose(reconstructed_selected_image, (1, 2, 0))), axis = 0)
+            return step_log_all, concat_image
         else:
             return step_log_all, np.zeros((20, 20)) #dummy return for lowdim
-        
+
     return step_log_all
 
 

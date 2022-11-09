@@ -256,6 +256,9 @@ class SequenceDataset(torch.utils.data.Dataset):
             all_demo_data["actions"] = action_data
             all_demo_data = ObsUtils.process_obs_dict(all_demo_data)
 
+            # print("EXPERIMENTAL ONLY")
+            # embed = np.concatenate(list(all_demo_data.values()), axis = 1)
+
             embed = classifier.compute_embeddings(all_demo_data)
             embedding_list.append(embed)
             label_list.extend([success for _ in range(embed.shape[0])])
@@ -437,17 +440,17 @@ class SequenceDataset(torch.utils.data.Dataset):
         print(f"Now there are {len(self.hdf5_cache.keys())} demos in the buffer.")
 
 
-    def reweight_data_from_dataset(self, dataset, THRESHOLD = 0, epsilon = 0.01):
+    def reweight_data_from_dataset(self, dataset, THRESHOLD = 0, soft = False):
         #this is when you have another weighted dataset and you want to compute the similiarity
 
         # L2 DISTANCE
-        # with torch.no_grad():
-        #     demo_embeddings = torch.tensor(dataset.offline_embeddings) #examples X D
-        #     self_embeddings = torch.tensor(self.offline_embeddings) #examples X D
-        #     batch_l2_norm = torch.cdist(demo_embeddings, self_embeddings, p = 2.0).numpy()
-        #     self._weight_list = -np.min(batch_l2_norm, axis = 0)
-        #     self._weight_list = (self._weight_list - np.min(self._weight_list)) / (
-        #                 np.max(self._weight_list) - np.min(self._weight_list))
+        with torch.no_grad():
+            demo_embeddings = torch.tensor(dataset.offline_embeddings) #examples X D
+            self_embeddings = torch.tensor(self.offline_embeddings) #examples X D
+            batch_l2_norm = torch.cdist(demo_embeddings, self_embeddings, p = 2.0).numpy()
+            self._weight_list = -np.min(batch_l2_norm, axis = 0)
+            self._weight_list = (self._weight_list - np.min(self._weight_list)) / (
+                        np.max(self._weight_list) - np.min(self._weight_list))
 
         # COSINE SIMILARITY
         # similarity_matrix = dataset.offline_embeddings @ self.offline_embeddings.T  # intervention X offline
@@ -458,11 +461,11 @@ class SequenceDataset(torch.utils.data.Dataset):
         # self._weight_list = 0.5 * (np.max(cosine_sim, axis=0) + 1)
 
         # MIN-MAX INNER PRODUCT SIMILARITY
-        similarity_matrix = dataset.offline_embeddings @ self.offline_embeddings.T  # intervention X offline
-        self._weight_list = np.max(similarity_matrix, axis = 0)
-        # self._weight_list = 0.5 * np.tanh(self._weight_list / 2) + 1 #sigmoid
-        self._weight_list = (self._weight_list - np.min(self._weight_list)) / (
-                    np.max(self._weight_list) - np.min(self._weight_list))
+        # similarity_matrix = dataset.offline_embeddings @ self.offline_embeddings.T  # intervention X offline
+        # self._weight_list = np.max(similarity_matrix, axis = 0)
+        # # self._weight_list = 0.5 * np.tanh(self._weight_list / 2) + 1 #sigmoid
+        # self._weight_list = (self._weight_list - np.min(self._weight_list)) / (
+        #             np.max(self._weight_list) - np.min(self._weight_list))
 
         # COMPUTE TEMPORAL ALIGNMENT
         # self_traj_embeds_list = self.get_traj_embeds()
@@ -481,7 +484,14 @@ class SequenceDataset(torch.utils.data.Dataset):
         # self._weight_list = (self._weight_list - np.min(self._weight_list)) / (
         #             np.max(self._weight_list) - np.min(self._weight_list))
 
-        self._weight_list[np.where(self._weight_list < THRESHOLD)] = 0  # hard cutoff
+        # self._weight_list[np.where(self._weight_list < THRESHOLD)] = 0  # hard cutoff
+
+        if not soft:
+            mask = self._weight_list < THRESHOLD
+            self._weight_list[np.where(mask)] = 0  # hard cutoff
+            self._weight_list[np.where(np.logical_not(mask))] = 1  # hard cutoff, essentially get a binary weight
+
+
 
     def reweight_data(self, intervention_set, classifier, THRESHOLD = 0, epsilon = 0.01):
         print("Reweighting data!")
@@ -977,3 +987,20 @@ class SequenceDataset(torch.utils.data.Dataset):
 
     def get_active_weight_proportion(self):
         return np.mean(self._weight_list > 0)
+
+    def weld_demos(self):
+        # this will return a flattened representation of the dataset, for use in weighting purposes
+        dict_list = {}
+        dict_list["actions"] = list()
+        for demo in self.demos:
+            all_demo_data = {key: self.get_dataset_for_ep(demo, f"obs/{key}")[:] for key in self.obs_keys}
+            dict_list["actions"].append(self.get_dataset_for_ep(demo, "actions"))
+
+            for obs_modality in all_demo_data.keys():
+                if obs_modality not in dict_list:
+                    dict_list[obs_modality] = list()
+                dict_list[obs_modality].append(all_demo_data[obs_modality])
+        final_dict = {}
+        for modality in dict_list:
+            final_dict[modality] = np.concatenate(dict_list[modality], axis=0)
+        return final_dict

@@ -22,7 +22,8 @@ from robomimic.utils.python_utils import extract_class_init_kwargs_from_dict
 import robomimic.utils.tensor_utils as TensorUtils
 import robomimic.utils.obs_utils as ObsUtils
 from robomimic.models.base_nets import Module, Sequential, MLP, RNN_Base, ResNet18Conv, SpatialSoftmax, \
-    FeatureAggregator, VisualCore, Randomizer
+    FeatureAggregator, VisualCore, Randomizer, ResNet18Dec
+
 
 
 def obs_encoder_factory(
@@ -320,6 +321,7 @@ class ObservationDecoder(Module):
 
         # important: sort observation keys to ensure consistent ordering of modalities
         assert isinstance(decode_shapes, OrderedDict)
+
         self.obs_shapes = OrderedDict()
         for k in decode_shapes:
             self.obs_shapes[k] = decode_shapes[k]
@@ -331,10 +333,15 @@ class ObservationDecoder(Module):
         """
         Create a linear layer to predict each modality.
         """
+
         self.nets = nn.ModuleDict()
         for k in self.obs_shapes:
-            layer_out_dim = int(np.prod(self.obs_shapes[k]))
-            self.nets[k] = nn.Linear(self.input_feat_dim, layer_out_dim)
+            if k == "agentview_image" or k == "robot0_eye_in_hand_image": #VERY JANKY
+                self.nets[k] = ResNet18Dec(z_dim = self.input_feat_dim, nc = 3, hw = 84)
+                # x = self.nets[k](torch.ones((120, 400))) #test!
+            else:
+                layer_out_dim = int(np.prod(self.obs_shapes[k]))
+                self.nets[k] = nn.Linear(self.input_feat_dim, layer_out_dim)
 
     def output_shape(self, input_shape=None):
         """
