@@ -188,9 +188,13 @@ class VAE_KNN(WeighingAlgo):
 
     def compute_embeddings(self, obs_dict):
         assert not self.nets.training
+        obs_dict = TensorUtils.to_tensor(obs_dict)
+        obs_dict = TensorUtils.to_device(obs_dict, self.device)
+        obs_dict = TensorUtils.to_float(obs_dict)
         with torch.no_grad():  # make sure we aren't saving the computation graphs, or we can have a memory leak
             encoder_params = self.nets["VAE"].encode(obs_dict)
-            embed = self.nets["VAE"].reparameterize(encoder_params).detach().cpu().numpy()
+            embed = encoder_params["mean"].detach().cpu().numpy()
+            # embed = self.nets["VAE"].reparameterize(encoder_params).detach().cpu().numpy()
         return embed
 
 

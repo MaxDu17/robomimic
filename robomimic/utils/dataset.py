@@ -257,9 +257,11 @@ class SequenceDataset(torch.utils.data.Dataset):
             all_demo_data = ObsUtils.process_obs_dict(all_demo_data)
 
             # print("EXPERIMENTAL ONLY")
+            # self.modality_order = list(all_demo_data.keys())
             # embed = np.concatenate(list(all_demo_data.values()), axis = 1)
 
             embed = classifier.compute_embeddings(all_demo_data)
+
             embedding_list.append(embed)
             label_list.extend([success for _ in range(embed.shape[0])])
             traj_label_list.append(success)
@@ -517,12 +519,18 @@ class SequenceDataset(torch.utils.data.Dataset):
             interventions = intervention_set
         interventions = ObsUtils.process_obs_dict(interventions)  # normalize and change shapes
 
+        # print("EXPERIMENTAL ONLY")
+        # values_list = list()
+        # for key in self.modality_order: #making sure that we are consistent in the order
+        #     values_list.append(interventions[key])
+        # intervention_embeddings = np.concatenate(values_list, axis=1)
+
         intervention_embeddings = classifier.compute_embeddings(interventions) #interventions X embedding matrix
 
         # L2 DISTANCE
         with torch.no_grad():
-            intervention_embeddings = torch.tensor(intervention_embeddings) #examples X D
-            self_embeddings = torch.tensor(self.offline_embeddings) #examples X D
+            intervention_embeddings = torch.tensor(intervention_embeddings, dtype = torch.float32) #examples X D
+            self_embeddings = torch.tensor(self.offline_embeddings, dtype =  torch.float32) #examples X D
             batch_l2_norm = torch.cdist(intervention_embeddings, self_embeddings, p = 2.0).numpy()
 
         self._weight_list = -np.min(batch_l2_norm, axis = 0)
