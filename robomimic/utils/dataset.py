@@ -4,6 +4,7 @@ to fetch batches from hdf5 files.
 """
 import os
 import h5py
+import random
 import numpy as np
 from copy import deepcopy
 from contextlib import contextmanager
@@ -96,6 +97,7 @@ class SequenceDataset(torch.utils.data.Dataset):
         self._last_samples = deque([], maxlen=10000)
         self._last_samples_identity = deque([], maxlen=10000)
         self.label_list = None
+        self.traj_label_list = None
 
         print(hdf5_cache_mode)
         assert hdf5_cache_mode in ["all", "low_dim", None]
@@ -549,58 +551,6 @@ class SequenceDataset(torch.utils.data.Dataset):
         # self._weight_list = (self._weight_list - np.min(self._weight_list)) / (np.max(self._weight_list) - np.min(self._weight_list))
 
 
-    # def reweight_data(self, intervention_set, classifier, THRESHOLD = 0, epsilon = 0.01):
-    #     """
-    #     :param intervention_set: a queue of dicts, each containing one observation
-    #     :param classifier: a pretrained classifier model that takes in two observations and predicts similarity score
-    #     :param THRESHOLD: a number below which everything is set to epsilon (to make it very unlikely to be sampled)
-    #     :param epsilon: a small number that substitues for 0 as the minimum (to prevent all weights from collapsing)
-    #     """
-    #     assert self.weighting, "You must enable weighting to weigh the dataset!"
-    #     assert self.hdf5_cache is not None, "Cachine is not yet implemented for weighted sampling"
-    #     assert not self.priority, "Priority sampling is not yet implemented for weighted sampling"
-    #     num_samples = len(intervention_set) # number of samples we are comparing
-    #
-    #     interventions_intermediate = {}
-    #     print("rewiring interventions")
-    #
-    #     # turning a queue of dicts into one dict
-    #     for sample in intervention_set:
-    #         for key in self.obs_keys: #only select items that are used in the interventions
-    #             if key not in interventions_intermediate:
-    #                 interventions_intermediate[key] = list()
-    #             interventions_intermediate[key].append(sample[key])
-    #     interventions = {}
-    #
-    #     for key, value in interventions_intermediate.items():
-    #         interventions[key] = np.stack(value, axis = 0)
-    #     interventions = ObsUtils.process_obs_dict(interventions) #normalize and change shapes
-    #     index = 0
-    #
-    #     TEMPERATURE = 1
-    #
-    #     for demo in LogUtils.custom_tqdm(self.demos):
-    #         all_demo_data = {key : self.get_dataset_for_ep(demo, f"obs/{key}") for key in self.obs_keys}
-    #         start_index = index
-    #         for index_in_demo in range(self._demo_id_to_demo_length[demo]):
-    #             transition = {key: value[index_in_demo] for key, value in all_demo_data.items()}
-    #             transition = {key: np.repeat(np.expand_dims(value, 0), num_samples, axis = 0) for key, value in
-    #                           transition.items()}  # make a pseudobatch
-    #             transition = ObsUtils.process_obs_dict(transition) #normalize and change shapes
-    #             all_scores = classifier.similarity_score(interventions, transition)
-    #
-    #             mean_score = all_scores.mean().item()
-    #             # mean_score = epsilon if mean_score < epsilon else mean_score # used to be THRESHOLD, but now we are normalizing
-    #             self._weight_list[index] = mean_score
-    #             index += 1
-    #         end_index = index
-    #
-    #         # NORMALIZATION PROCESS
-    #         self._weight_list[start_index : end_index] = np.exp(self._weight_list[start_index : end_index] / TEMPERATURE)
-    #         self._weight_list[start_index : end_index] = self._weight_list[start_index : end_index] / np.sum(self._weight_list[start_index : end_index])
-    #         # self._weight_list[start_index : end_index] *= (end_index - start_index - 1) #scaling each element between 0 and 1, insted of the sum
-
-
     def visualize_demo(self, num_demos, video_writer):
         demos = np.random.choice(self.demos, num_demos)
         max_length = 0
@@ -811,7 +761,7 @@ class SequenceDataset(torch.utils.data.Dataset):
                 keys=self.obs_keys,
                 num_frames_to_stack=0,
                 seq_length=1,
-                prefix="next_obs",
+                prefix="obs", #used to be next_obs
             )
             if self.hdf5_normalize_obs:
                 goal = ObsUtils.normalize_obs(goal, obs_normalization_stats=self.obs_normalization_stats)
@@ -995,6 +945,32 @@ class SequenceDataset(torch.utils.data.Dataset):
 
     def get_active_weight_proportion(self):
         return np.mean(self._weight_list > 0)
+
+    def get_valid_demos(self): # oracle function
+        valid_list = list()
+        # NOT ROBUST; USE THE ORACLE INDICATOR HANDLE INSTAED TODO
+        for demo in self.demos:
+            if self.get_dataset_for_ep(demo, "rewards")[-1] > 0:
+                valid_list.append(demo)
+        return valid_list
+
+    def get_goal(self): #return unnormalized goal for rollout
+        valid_demos = self.get_valid_demos()
+        demo_id = random.choice(valid_demos)
+        viable_sample_size = self._demo_id_to_demo_length[demo_id]
+        demo_length_offset = 0 if self.pad_seq_length else (self.seq_length - 1)
+        end_index_in_demo = viable_sample_size - demo_length_offset
+
+        goal = self.get_obs_sequence_from_demo(
+            demo_id,
+            index_in_demo=end_index_in_demo - 1,
+            keys=self.obs_keys,
+            num_frames_to_stack=0,
+            seq_length=1,
+            prefix="obs",  # used to be next_obs
+        )
+
+        return {k: goal[k][0] for k in goal}
 
     def weld_demos(self):
         # this will return a flattened representation of the dataset, for use in weighting purposes

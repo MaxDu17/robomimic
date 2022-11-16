@@ -196,6 +196,7 @@ def run_rollout(
         env,
         horizon,
         use_goals=False,
+        goal = None,
         render=False,
         video_writer=None,
         video_skip=5,
@@ -238,9 +239,14 @@ def run_rollout(
     obs_dict = env.reset_to(state_dict)
 
     goal_dict = None
-    if use_goals:
+    if use_goals and goal is None: #if we don't specify a goal, ask the environent
         # retrieve goal from the environment
         goal_dict = env.get_goal()
+    elif use_goals and goal is not None:
+        goal_dict = goal
+
+
+        # may consider instaed providing an image directly, or an observation directly
 
     results = {}
     video_count = 0  # video frame counter
@@ -319,6 +325,7 @@ def rollout_with_stats(
         envs,
         horizon,
         use_goals=False,
+        goal = None,
         num_episodes=None,
         render=False,
         video_dir=None,
@@ -411,6 +418,7 @@ def rollout_with_stats(
                 horizon=horizon,
                 render=render,
                 use_goals=use_goals,
+                goal = goal,
                 video_writer=env_video_writer if not record_first or ep_i == 0 else None,
                 video_skip=video_skip,
                 terminate_on_success=terminate_on_success,

@@ -191,10 +191,12 @@ class VAE_KNN(WeighingAlgo):
         obs_dict = TensorUtils.to_tensor(obs_dict)
         obs_dict = TensorUtils.to_device(obs_dict, self.device)
         obs_dict = TensorUtils.to_float(obs_dict)
+
         with torch.no_grad():  # make sure we aren't saving the computation graphs, or we can have a memory leak
             encoder_params = self.nets["VAE"].encode(obs_dict)
-            embed = encoder_params["mean"].detach().cpu().numpy()
-            # embed = self.nets["VAE"].reparameterize(encoder_params).detach().cpu().numpy()
+            embed = torch.cat((encoder_params["mean"], obs_dict["actions"]), dim = 1).detach().cpu().numpy()
+            # embed = encoder_params["mean"].detach().cpu().numpy()
+
         return embed
 
 
