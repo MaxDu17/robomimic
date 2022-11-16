@@ -123,6 +123,7 @@ def get_shape_metadata_from_dataset(dataset_path, all_obs_keys=None, verbose=Fal
 
     for k in sorted(all_obs_keys):
         initial_shape = demo["obs/{}".format(k)].shape[1:]
+
         if verbose:
             print("obs key {} with shape {}".format(k, initial_shape))
         # Store processed shape for each obs key

@@ -254,7 +254,11 @@ class SequenceDataset(torch.utils.data.Dataset):
             #     continue
             all_demo_data = {key: self.get_dataset_for_ep(demo, f"obs/{key}")[:] for key in self.obs_keys}
             action_data = self.get_dataset_for_ep(demo, "actions") #for use in the embeddings
-            success = self.get_dataset_for_ep(demo, "rewards")[-1] #for plotting purposes only
+     
+            if "target" not in self.hdf5_file["data"][demo].attrs: # attrs["target"]
+                success = self.get_dataset_for_ep(demo, "rewards")[-1] #for plotting purposes only
+            else:
+                success = self.hdf5_file["data"][demo].attrs["target"]
             all_demo_data["actions"] = action_data
             all_demo_data = ObsUtils.process_obs_dict(all_demo_data)
 
