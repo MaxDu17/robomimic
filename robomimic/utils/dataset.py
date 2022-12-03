@@ -254,7 +254,7 @@ class SequenceDataset(torch.utils.data.Dataset):
             #     continue
             all_demo_data = {key: self.get_dataset_for_ep(demo, f"obs/{key}")[:] for key in self.obs_keys}
             action_data = self.get_dataset_for_ep(demo, "actions") #for use in the embeddings
-     
+
             if "target" not in self.hdf5_file["data"][demo].attrs: # attrs["target"]
                 success = self.get_dataset_for_ep(demo, "rewards")[-1] #for plotting purposes only
             else:
@@ -759,6 +759,19 @@ class SequenceDataset(torch.utils.data.Dataset):
                 meta["next_obs"] = ObsUtils.normalize_obs(meta["next_obs"], obs_normalization_stats=self.obs_normalization_stats)
 
         if goal_index is not None:
+
+            ##### SUPER JANKY TEST FOR BASELINE ####
+            # current_demo_num = int(demo_id.split("_")[-1])
+            # if current_demo_num % 2 == 0:
+            #     demo_id = "demo_2"
+            #     goal_index = 93
+            #
+            # else:
+            #     demo_id = "demo_3" # good goals state
+            #     goal_index = 114
+            ########################################
+            # demo_id = "demo_3"
+            # goal_index = 114 # BASELINES THIS IS SUPER JANK
             goal = self.get_obs_sequence_from_demo(
                 demo_id,
                 index_in_demo=goal_index,
@@ -961,6 +974,8 @@ class SequenceDataset(torch.utils.data.Dataset):
     def get_goal(self): #return unnormalized goal for rollout
         valid_demos = self.get_valid_demos()
         demo_id = random.choice(valid_demos)
+        # demo_id = "demo_3"
+
         viable_sample_size = self._demo_id_to_demo_length[demo_id]
         demo_length_offset = 0 if self.pad_seq_length else (self.seq_length - 1)
         end_index_in_demo = viable_sample_size - demo_length_offset

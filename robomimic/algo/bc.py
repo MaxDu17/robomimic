@@ -106,6 +106,8 @@ class BC(PolicyAlgo):
             info (dict): dictionary of relevant inputs, outputs, and losses
                 that might be relevant for logging
         """
+        # print("sanity check")
+        # batch["goal_obs"] = {k :  torch.zeros_like(v) for k, v in batch["goal_obs"].items()}
         with TorchUtils.maybe_no_grad(no_grad=validate):
             info = super(BC, self).train_on_batch(batch, epoch, validate=validate)
             predictions = self._forward_training(batch)
@@ -549,6 +551,8 @@ class BC_RNN(BC):
             obs_to_use = self._open_loop_obs
 
         self._rnn_counter += 1
+        # print("SANITYCHECK")
+        # goal_dict = {k : torch.zeros_like(v) for k, v in goal_dict.items()}
         action, self._rnn_hidden_state = self.nets["policy"].forward_step(
             obs_to_use, goal_dict=goal_dict, rnn_state=self._rnn_hidden_state)
         return action

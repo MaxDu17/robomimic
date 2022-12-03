@@ -8,24 +8,25 @@ import numpy as np
 from copy import deepcopy
 
 import gym
-try:
-    import d4rl
-except:
-    print("WARNING: could not load d4rl environments!")
+# try:
+#     import d4rl
+# except:
+#     print("WARNING: could not load d4rl environments!")
 
 import robomimic.envs.env_base as EB
 import robomimic.utils.obs_utils as ObsUtils
+from iris_robots.robot_env import RobotEnv
 
 
 class EnvGym(EB.EnvBase):
     """Wrapper class for gym"""
     def __init__(
         self,
-        env_name, 
-        render=False, 
-        render_offscreen=False, 
-        use_image_obs=False, 
-        postprocess_visual_obs=True, 
+        env_name,
+        render=False,
+        render_offscreen=False,
+        use_image_obs=False,
+        postprocess_visual_obs=True,
         **kwargs,
     ):
         """
@@ -41,6 +42,7 @@ class EnvGym(EB.EnvBase):
 
             postprocess_visual_obs (bool): ignored - gym envs don't typically use images
         """
+        # TODO: modify this to support images
         self._init_kwargs = deepcopy(kwargs)
         self._env_name = env_name
         self._current_obs = None
@@ -87,7 +89,7 @@ class EnvGym(EB.EnvBase):
         Args:
             state (dict): current simulator state that contains:
                 - states (np.ndarray): initial state of the mujoco environment
-        
+
         Returns:
             observation (dict): observation dictionary after setting the simulator state
         """
@@ -122,10 +124,11 @@ class EnvGym(EB.EnvBase):
             ob (np.array): current flat observation vector to wrap and provide as a dictionary.
                 If not provided, uses self._current_obs.
         """
+        #TODO: MODIFY THIS
         if obs is None:
             assert self._current_obs is not None
             obs = self._current_obs
-        return { "flat" : np.copy(obs) }
+        return obs #{ "flat" : np.copy(obs) }
 
     def get_state(self):
         """
@@ -221,6 +224,7 @@ class EnvGym(EB.EnvBase):
 
         # make sure to initialize obs utils so it knows which modalities are image modalities.
         # For currently supported gym tasks, there are no image observations.
+        raise Exception("image not supported yet!")
         obs_modality_specs = {
             "obs": {
                 "low_dim": ["flat"],
@@ -245,3 +249,8 @@ class EnvGym(EB.EnvBase):
         Pretty-print env description.
         """
         return self.name + "\n" + json.dumps(self._init_kwargs, sort_keys=True, indent=4)
+
+if __name__ == "__main__":
+    env = EnvGym("iris_dummy"),
+    import ipdb
+    ipdb.set_trace()

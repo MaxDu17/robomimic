@@ -180,6 +180,7 @@ class EnvRoboverse(EB.EnvBase):
         # ret["gripper_qpos"] = np.array(di["gripper_qpos"])
         # ret["object"] = np.array(di["object"])
         ret["state"] = np.array(di["state"])
+        ret["robot"] = np.array(di["robot"])
 
         # quirk in the environment
         if "agentview_image" in ret:
