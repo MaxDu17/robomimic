@@ -15,6 +15,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torchvision import models as vision_models
+from torchvision import transforms
+
 
 import robomimic.utils.tensor_utils as TensorUtils
 import robomimic.utils.obs_utils as ObsUtils
@@ -1482,6 +1484,7 @@ class CropRandomizer(Randomizer):
             num_crops=self.num_crops,
             pos_enc=self.pos_enc,
         )
+
         # [B, N, ...] -> [B * N, ...]
         return TensorUtils.join_dimensions(out, 0, 1)
 
@@ -1495,6 +1498,63 @@ class CropRandomizer(Randomizer):
         out = TensorUtils.reshape_dimensions(inputs, begin_axis=0, end_axis=0,
             target_dims=(batch_size, self.num_crops))
         return out.mean(dim=1)
+
+    def __repr__(self):
+        """Pretty print network."""
+        header = '{}'.format(str(self.__class__.__name__))
+        msg = header + "(input_shape={}, crop_size=[{}, {}], num_crops={})".format(
+            self.input_shape, self.crop_height, self.crop_width, self.num_crops)
+        return msg
+
+
+# adds color jitter to the input, leaves all else unchanged
+class CropRandomizerJitter(CropRandomizer):
+    """
+    Randomly sample crops at input, and then average across crop features at output.
+    """
+    def __init__(
+        self,
+        input_shape,
+        crop_height,
+        crop_width,
+        num_crops=1,
+        pos_enc=False,
+        brightness = 0.2,
+        contrast = 0.2,
+        saturation = 0.2,
+        hue = 0.2,
+    ):
+        """
+        Args:
+            input_shape (tuple, list): shape of input (not including batch dimension)
+            crop_height (int): crop height
+            crop_width (int): crop width
+            num_crops (int): number of random crops to take
+            pos_enc (bool): if True, add 2 channels to the output to encode the spatial
+                location of the cropped pixels in the source image
+        """
+        super(CropRandomizerJitter, self).__init__(input_shape, crop_height, crop_width, num_crops, pos_enc)
+        self.color_jitter = transforms.ColorJitter(brightness = brightness, contrast = contrast, saturation = saturation, hue = hue)
+
+    def forward_in(self, inputs):
+        """
+        Samples N random crops for each input in the batch, and then reshapes
+        inputs to [B * N, ...].
+        """
+        batched_images = super().forward_in(inputs)
+        # jittered = self.color_jitter(batched_images)
+        #
+        # import matplotlib.pyplot as plt
+        # image = np.transpose(jittered[3].detach().cpu().numpy(), (1, 2, 0))
+        # plt.imshow(image)
+        # plt.savefig("test.png")
+        #
+        # image = np.transpose(batched_images[3].detach().cpu().numpy(), (1, 2, 0))
+        # plt.imshow(image)
+        # plt.savefig("testa.png")
+        # import ipdb
+        # ipdb.set_trace()
+        return self.color_jitter(batched_images)
 
     def __repr__(self):
         """Pretty print network."""

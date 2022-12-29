@@ -31,6 +31,7 @@ class EnvRoboverse(EB.EnvBase):
             render_offscreen=False,
             use_image_obs=False,
             postprocess_visual_obs=True,
+            accept_trajectory_key = "target_place_success", # required default for backward compatibility
             **kwargs,
     ):
         """
@@ -70,6 +71,9 @@ class EnvRoboverse(EB.EnvBase):
         self.env = roboverse.make(env_name,
                              gui=render,
                              transpose_image=False, **kwargs)
+        self.accept_trajectory_key = accept_trajectory_key
+        self.total_reward = 0
+        self.total_reward_thresh = sum([subtask.REWARD for subtask in self.env.subtasks])
 
     def step(self, action):
         """
@@ -86,6 +90,7 @@ class EnvRoboverse(EB.EnvBase):
         """
         obs, r, done, info = self.env.step(action)
         obs = self.get_observation(obs)
+        self.total_reward += r
         return obs, r, self.is_done(), info
 
     def reset(self):
@@ -96,38 +101,16 @@ class EnvRoboverse(EB.EnvBase):
             observation (dict): initial observation dictionary.
         """
         di = self.env.reset()
+        self.total_reward = 0
+        self.total_reward_thresh = sum([subtask.REWARD for subtask in self.env.subtasks])
         return self.get_observation(di)
 
     def reset_to(self, state):
         #not working!
         return
-    #     """
-    #     Reset to a specific simulator state.
-    #
-    #     Args:
-    #         state (dict): current simulator state that contains one or more of:
-    #             - states (np.ndarray): initial state of the mujoco environment
-    #             - model (str): mujoco scene xml
-    #
-    #     Returns:
-    #         observation (dict): observation dictionary after setting the simulator state (only
-    #             if "states" is in @state)
-    #     """
-    #
-    #     base_po, base_v, joint_states = state["states"]
-    #     p2 = self.env.env._p
-    #     for i in range(p2.getNumBodies()):
-    #         p2.resetBasePositionAndOrientation(i, *base_po[i])
-    #         p2.resetBaseVelocity(i, *base_v[i])
-    #         for j in range(p2.getNumJoints(i)):
-    #             p2.resetJointState(i, j, *joint_states[i][j][:2])
-    #
-    #     if should_ret:
-    #         # only return obs if we've done a forward call - otherwise the observations will be garbage
-    #         return self.get_observation()
-    #     return None
 
-    def render(self, mode="rgb_array", height=None, width=None, camera_name="agentview", eye_in_hand = False):
+
+    def render(self, mode="rgb_array", height=None, width=None, camera_name="agentview"):
         """
         Render from simulation to either an on-screen window or off-screen to RGB array.
 
@@ -140,7 +123,12 @@ class EnvRoboverse(EB.EnvBase):
         assert mode != "human"
         #TODO: IMPLEMENT EYE IN HAND HERE
         if mode == "rgb_array":
-            return self.env.render_obs(res = height, eye_in_hand = eye_in_hand)
+            if camera_name == "robot0_eye_in_hand_image": #compatible with the robomimic utils
+                return self.env.render_obs(res = height, eye_in_hand = True)[1] #the rendering engine call directly
+            elif camera_name == "agentview":
+                return self.env.render_obs(res=height, eye_in_hand = False)
+            else:
+                raise Exception("invalid camera!")
         else:
             raise NotImplementedError("mode={} is not implemented".format(mode))
 
@@ -236,15 +224,34 @@ class EnvRoboverse(EB.EnvBase):
         # Robosuite envs always rollout to fixed horizon.
         return False
 
+    def get_priv_info(self):
+        return {}
+
     def is_success(self):
         """
         Check if the task condition(s) is reached. Should return a dictionary
         { str: bool } with at least a "task" key for the overall task success,
         and additional optional keys corresponding to other task criteria.
         """
-        info = self.env.get_info()
 
-        return {"task" : info["target_place_success"]} #gets the target task
+        info = self.env.get_info()
+        success = False
+        # print(self.total_reward, self.total_reward_thresh)
+        if self.accept_trajectory_key == 'table_clean':
+            print(self.total_reward)
+            if self.total_reward == self.total_reward_thresh :
+                success = True
+                # print(f"time {j}")
+        else:
+            # print(info)
+            if info[self.accept_trajectory_key]:
+                success = True
+
+        # status = {"task" : info["target_place_success"]}
+        status = {"task" : success}
+        # print(status)
+        # DO NOT CHANGE UNTIL CURRENT OFFICE RUSN ARE DONE
+        return status #{"task" : info["target_place_success"]} #gets the target task
 
     @property
     def action_dimension(self):

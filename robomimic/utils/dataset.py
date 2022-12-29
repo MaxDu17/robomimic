@@ -967,8 +967,16 @@ class SequenceDataset(torch.utils.data.Dataset):
         valid_list = list()
         # NOT ROBUST; USE THE ORACLE INDICATOR HANDLE INSTAED TODO
         for demo in self.demos:
-            if self.get_dataset_for_ep(demo, "rewards")[-1] > 0:
+            try:
+                valid = self.hdf5_file["data"][demo].attrs["target"]
+            except:
+                valid = self.get_dataset_for_ep(demo, "rewards")[-1] > 0
+
+            if valid:
                 valid_list.append(demo)
+            # ep_data_grp.attrs["target"]
+            # if self.get_dataset_for_ep(demo, "rewards")[-1] > 0:
+            #     valid_list.append(demo)
         return valid_list
 
     def get_goal(self): #return unnormalized goal for rollout
