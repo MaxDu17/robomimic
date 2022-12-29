@@ -51,6 +51,9 @@ class EnvGym(EB.EnvBase):
         self._done = None
         self.env = gym.make(env_name, **kwargs)
 
+    def set_pose(self, state):
+        self.env.update_robot(state[0:3], state[3:6], state[-1])
+
     def step(self, action):
         """
         Step in the environment with an action.
@@ -64,7 +67,7 @@ class EnvGym(EB.EnvBase):
             done (bool): whether the task is done
             info (dict): extra information
         """
-        obs, reward, done, info = self.env.step(action)
+        obs, reward, done, info = self.env.step_direct(action) # FOR DEBUGGING PURPOSES ONLY
         self._current_obs = obs
         self._current_reward = reward
         self._current_done = done
