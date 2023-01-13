@@ -67,7 +67,7 @@ class EnvGym(EB.EnvBase):
             done (bool): whether the task is done
             info (dict): extra information
         """
-        obs, reward, done, info = self.env.step_direct(action) # FOR DEBUGGING PURPOSES ONLY
+        obs, reward, done, info = self.env.step(action) # FOR DEBUGGING PURPOSES ONLY
         self._current_obs = obs
         self._current_reward = reward
         self._current_done = done

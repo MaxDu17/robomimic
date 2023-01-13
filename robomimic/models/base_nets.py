@@ -450,6 +450,65 @@ class ConvBase(Module):
             )
         return x
 
+class R3MResNet18Conv(ConvBase):
+    """
+    A ResNet18 block that can be used to process input images.
+    """
+    def __init__(
+        self,
+        input_channel=3,
+        lock_encoder = True
+    ):
+        """
+        Args:
+            input_channel (int): number of input channels for input images to the network.
+                If not equal to 3, modifies first conv layer in ResNet to handle the number
+                of input channels.
+            pretrained (bool): if True, load pretrained weights for all ResNet layers.
+            input_coord_conv (bool): if True, use a coordinate convolution for the first layer
+                (a convolution where input channels are modified to encode spatial pixel location)
+        """
+        super(R3MResNet18Conv, self).__init__()
+        from r3m import load_r3m
+        net = load_r3m("resnet18").module.convnet  # resnet18, resnet34
+        if lock_encoder:
+            print("encoder locked!")
+            for param in net.parameters():
+                param.requires_grad = False
+
+        # cut the last fc layer
+        self._input_coord_conv = False
+        self._input_channel = input_channel
+        self.nets = torch.nn.Sequential(*(list(net.children())[:-2]))
+
+    def output_shape(self, input_shape):
+        """
+        Function to compute output shape from inputs to this module.
+
+        Args:
+            input_shape (iterable of int): shape of input. Does not include batch dimension.
+                Some modules may not need this argument, if their output does not depend
+                on the size of the input, or if they assume fixed size input.
+
+        Returns:
+            out_shape ([int]): list of integers corresponding to output shape
+        """
+        assert(len(input_shape) == 3)
+        out_h = int(math.ceil(input_shape[1] / 32.))
+        out_w = int(math.ceil(input_shape[2] / 32.))
+        return [512, out_h, out_w]
+
+    def forward(self, inputs):
+        scaled_inputs = inputs * 255.0
+        # resized = transforms.Resize((224, 224))(scaled_inputs)
+        # print("SCALED")
+        return self.nets(scaled_inputs)
+
+    def __repr__(self):
+        """Pretty print network."""
+        header = '{}'.format(str(self.__class__.__name__))
+        return header + '(input_channel={}, input_coord_conv={})'.format(self._input_channel, self._input_coord_conv)
+
 class ResNet18Conv(ConvBase):
     """
     A ResNet18 block that can be used to process input images.
@@ -1541,19 +1600,17 @@ class CropRandomizerJitter(CropRandomizer):
         Samples N random crops for each input in the batch, and then reshapes
         inputs to [B * N, ...].
         """
-        batched_images = super().forward_in(inputs)
-        # jittered = self.color_jitter(batched_images)
-        #
-        # import matplotlib.pyplot as plt
-        # image = np.transpose(jittered[3].detach().cpu().numpy(), (1, 2, 0))
-        # plt.imshow(image)
-        # plt.savefig("test.png")
-        #
-        # image = np.transpose(batched_images[3].detach().cpu().numpy(), (1, 2, 0))
-        # plt.imshow(image)
-        # plt.savefig("testa.png")
-        # import ipdb
-        # ipdb.set_trace()
+        assert len(inputs.shape) >= 3  # must have at least (C, H, W) dimensions
+
+        if not self.training:
+            to_trim = (inputs.shape[3] - self.crop_width) // 2
+            h = inputs.shape[2]
+            w = inputs.shape[3]
+            out = inputs[:, :, to_trim : h - to_trim, to_trim : w - to_trim]
+            print("ROLLOUT")
+            return out #only center crop, no jitter
+
+        batched_images =  super().forward_in(inputs)
         return self.color_jitter(batched_images)
 
     def __repr__(self):
