@@ -889,7 +889,6 @@ class RNNGMMActorNetwork(RNNActorNetwork):
         if self.use_tanh:
             # Wrap distribution with Tanh
             dists = TanhWrappedDistribution(base_dist=dists, scale=1.)
-
         if return_state:
             return dists, state
         else:
@@ -1210,3 +1209,258 @@ class VAEActor(Module):
             mod = list(obs_dict.keys())[0]
             n = obs_dict[mod].shape[0]
         return self.decode(obs_dict=obs_dict, goal_dict=goal_dict, z=z, n=n)["action"]
+
+class TrajEncoder_Network(RNN_MIMO_MLP):
+    """
+    An RNN policy network that predicts actions from observations.
+    """
+    def __init__(
+        self,
+        obs_shapes,
+        ac_dim,
+        mlp_layer_dims,
+        rnn_hidden_dim,
+        rnn_num_layers,
+        rnn_type="LSTM",  # [LSTM, GRU]
+        rnn_kwargs=None,
+        goal_shapes=None,
+        fixed_std=False,
+        std_activation="softplus",
+        init_std=0.3,
+        mean_limits=(-9.0, 9.0),
+        std_limits=(0.007, 7.5),
+        low_noise_eval=True,
+        use_tanh=False,
+        encoder_kwargs=None,
+    ):
+        """
+        Args:
+            obs_shapes (OrderedDict): a dictionary that maps modality to
+                expected shapes for observations.
+
+            ac_dim (int): dimension of action space.
+
+            mlp_layer_dims ([int]): sequence of integers for the MLP hidden layers sizes.
+
+            rnn_hidden_dim (int): RNN hidden dimension
+
+            rnn_num_layers (int): number of RNN layers
+
+            rnn_type (str): [LSTM, GRU]
+
+            rnn_kwargs (dict): kwargs for the torch.nn.LSTM / GRU
+
+            goal_shapes (OrderedDict): a dictionary that maps modality to
+                expected shapes for goal observations.
+
+            encoder_kwargs (dict or None): If None, results in default encoder_kwargs being applied. Otherwise, should
+                be nested dictionary containing relevant per-modality information for encoder networks.
+                Should be of form:
+
+                obs_modality1: dict
+                    feature_dimension: int
+                    core_class: str
+                    core_kwargs: dict
+                        ...
+                        ...
+                    obs_randomizer_class: str
+                    obs_randomizer_kwargs: dict
+                        ...
+                        ...
+                obs_modality2: dict
+                    ...
+        """
+        self.ac_dim = ac_dim
+
+        assert isinstance(obs_shapes, OrderedDict)
+        self.obs_shapes = obs_shapes
+
+        # set up different observation groups for @RNN_MIMO_MLP
+        observation_group_shapes = OrderedDict()
+        observation_group_shapes["obs"] = OrderedDict(self.obs_shapes)
+
+        self._is_goal_conditioned = False
+        if goal_shapes is not None and len(goal_shapes) > 0:
+            assert isinstance(goal_shapes, OrderedDict)
+            self._is_goal_conditioned = True
+            self.goal_shapes = OrderedDict(goal_shapes)
+            observation_group_shapes["goal"] = OrderedDict(self.goal_shapes)
+        else:
+            self.goal_shapes = OrderedDict()
+
+        self.fixed_std = fixed_std
+        self.init_std = init_std
+        self.mean_limits = np.array(mean_limits)
+        self.std_limits = np.array(std_limits)
+
+        # Define activations to use
+        def softplus_scaled(x):
+            out = F.softplus(x)
+            out = out * (self.init_std / F.softplus(torch.zeros(1).to(x.device)))
+            return out
+
+        self.activations = {
+            None: lambda x: x,
+            "softplus": softplus_scaled,
+            "exp": torch.exp,
+        }
+        assert std_activation in self.activations, \
+            "std_activation must be one of: {}; instead got: {}".format(self.activations.keys(), std_activation)
+        self.std_activation = std_activation if not self.fixed_std else None
+
+        self.low_noise_eval = low_noise_eval
+        self.use_tanh = use_tanh
+
+        output_shapes = self._get_output_shapes()
+        super(TrajEncoder_Network, self).__init__(
+            input_obs_group_shapes=observation_group_shapes,
+            output_shapes=output_shapes,
+            mlp_layer_dims=mlp_layer_dims,
+            mlp_activation=nn.ReLU,
+            mlp_layer_func=nn.Linear,
+            rnn_hidden_dim=rnn_hidden_dim,
+            rnn_num_layers=rnn_num_layers,
+            rnn_type=rnn_type,
+            rnn_kwargs=rnn_kwargs,
+            per_step=True,
+            encoder_kwargs=encoder_kwargs,
+        )
+
+    def _get_output_shapes(self):
+        """
+        Tells @MIMO_MLP superclass about the output dictionary that should be generated
+        at the last layer. Network outputs parameters of Gaussian distribution.
+        """
+        return OrderedDict(
+            mean=(self.ac_dim,),
+            scale=(self.ac_dim,),
+        )
+
+    def output_shape(self, input_shape):
+        # note: @input_shape should be dictionary (key: mod)
+        # infers temporal dimension from input shape
+        mod = list(self.obs_shapes.keys())[0]
+        T = input_shape[mod][0]
+        TensorUtils.assert_size_at_dim(input_shape, size=T, dim=0,
+                msg="RNNActorNetwork: input_shape inconsistent in temporal dimension")
+        return [T, self.ac_dim]
+
+    def forward_train(self, obs_dict, goal_dict=None, rnn_init_state=None, return_state=False):
+        """
+        Return full Gaussian distribution, which is useful for computing
+        quantities necessary at train-time, like log-likelihood, KL
+        divergence, etc.
+
+        Args:
+            obs_dict (dict): batch of observations
+            goal_dict (dict): if not None, batch of goal observations
+
+        Returns:
+            dist (Distribution): Gaussian distribution
+        """
+        if self._is_goal_conditioned:
+            assert goal_dict is not None
+            # repeat the goal observation in time to match dimension with obs_dict
+            mod = list(obs_dict.keys())[0]
+            goal_dict = TensorUtils.unsqueeze_expand_at(goal_dict, size=obs_dict[mod].shape[1], dim=1)
+
+        out = super(TrajEncoder_Network, self).forward(
+            obs=obs_dict, goal=goal_dict, rnn_init_state=rnn_init_state, return_state=return_state)
+
+        # THIS IS SUPER JANK; WE ARE ONLY USING THE LAST ACTIVATION
+        mean = out["mean"][:, -1]
+        # Use either constant std or learned std depending on setting
+        scale = out["scale"][:, -1] if not self.fixed_std else torch.ones_like(mean) * self.init_std
+      
+        # Clamp the mean
+        mean = torch.clamp(mean, min=self.mean_limits[0], max=self.mean_limits[1])
+
+        # apply tanh squashing to mean if not using tanh-Gaussian to ensure mean is in [-1, 1]
+        if not self.use_tanh:
+            mean = torch.tanh(mean)
+
+        # Calculate scale
+        if self.low_noise_eval and (not self.training):
+            # override std value so that you always approximately sample the mean
+            scale = torch.ones_like(mean) * 1e-4
+        else:
+            # Post-process the scale accordingly
+            scale = self.activations[self.std_activation](scale)
+            # Clamp the scale
+            scale = torch.clamp(scale, min=self.std_limits[0], max=self.std_limits[1])
+
+        # the Independent call will make it so that `batch_shape` for dist will be equal to batch size
+        # while `event_shape` will be equal to action dimension - ensuring that log-probability
+        # computations are summed across the action dimension
+        dist = D.Normal(loc=mean, scale=scale)
+        dist = D.Independent(dist, 1)
+
+        if self.use_tanh:
+            # Wrap distribution with Tanh
+            dist = TanhWrappedDistribution(base_dist=dist, scale=1.)
+
+        return dist
+
+    def forward(self, obs_dict, goal_dict=None , rnn_init_state=None, return_state=False):
+        """
+        Samples actions from the policy distribution.
+
+        Args:
+            obs_dict (dict): batch of observations
+            goal_dict (dict): if not None, batch of goal observations
+
+        Returns:
+            action (torch.Tensor): batch of actions from policy distribution
+        """
+
+        dist = self.forward_train(obs_dict, goal_dict, rnn_init_state, return_state)
+        if self.low_noise_eval and (not self.training):
+            if self.use_tanh:
+                # # scaling factor lets us output actions like [-1. 1.] and is consistent with the distribution transform
+                # return (1. + 1e-6) * torch.tanh(dist.base_dist.mean)
+                return torch.tanh(dist.mean)
+            return dist.mean
+        return dist.sample()
+
+
+
+
+    #
+    #
+    # def forward(self, obs_dict, goal_dict=None, rnn_init_state=None, return_state=False):
+    #     """
+    #     Forward a sequence of inputs through the RNN and the per-step network.
+    #
+    #     Args:
+    #         obs_dict (dict): batch of observations - each tensor in the dictionary
+    #             should have leading dimensions batch and time [B, T, ...]
+    #         goal_dict (dict): if not None, batch of goal observations
+    #         rnn_init_state: rnn hidden state, initialize to zero state if set to None
+    #         return_state (bool): whether to return hidden state
+    #
+    #     Returns:
+    #         actions (torch.Tensor): predicted action sequence
+    #         rnn_state: return rnn state at the end if return_state is set to True
+    #     """
+    #     if self._is_goal_conditioned:
+    #         assert goal_dict is not None
+    #         # repeat the goal observation in time to match dimension with obs_dict
+    #         mod = list(obs_dict.keys())[0]
+    #         goal_dict = TensorUtils.unsqueeze_expand_at(goal_dict, size=obs_dict[mod].shape[1], dim=1)
+    #
+    #     outputs = super(RNNActorNetwork, self).forward(
+    #         obs=obs_dict, goal=goal_dict, rnn_init_state=rnn_init_state, return_state=return_state)
+    #
+    #     if return_state:
+    #         actions, state = outputs
+    #     else:
+    #         actions = outputs
+    #         state = None
+    #
+    #     # apply tanh squashing to ensure actions are in [-1, 1]
+    #     actions = torch.tanh(actions["action"])
+    #
+    #     if return_state:
+    #         return actions, state
+    #     else:
+    #         return actions

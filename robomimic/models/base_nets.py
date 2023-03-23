@@ -470,7 +470,7 @@ class R3MResNet18Conv(ConvBase):
         """
         super(R3MResNet18Conv, self).__init__()
         from r3m import load_r3m
-        net = load_r3m("resnet18").module.convnet  # resnet18, resnet34
+        net = load_r3m("resnet18") #.module.convnet  # resnet18, resnet34
         if lock_encoder:
             print("encoder locked!")
             for param in net.parameters():
@@ -479,7 +479,9 @@ class R3MResNet18Conv(ConvBase):
         # cut the last fc layer
         self._input_coord_conv = False
         self._input_channel = input_channel
-        self.nets = torch.nn.Sequential(*(list(net.children())[:-2]))
+        self.nets = net
+
+        # self.nets = torch.nn.Sequential(*(list(net.children())[:-2]))
 
     def output_shape(self, input_shape):
         """
@@ -494,15 +496,15 @@ class R3MResNet18Conv(ConvBase):
             out_shape ([int]): list of integers corresponding to output shape
         """
         assert(len(input_shape) == 3)
-        out_h = int(math.ceil(input_shape[1] / 32.))
-        out_w = int(math.ceil(input_shape[2] / 32.))
-        return [512, out_h, out_w]
+        # out_h = int(math.ceil(input_shape[1] / 32.))
+        # out_w = int(math.ceil(input_shape[2] / 32.))
+        return [512]
 
     def forward(self, inputs):
         scaled_inputs = inputs * 255.0
-        # resized = transforms.Resize((224, 224))(scaled_inputs)
+        resized = transforms.Resize((224, 224))(scaled_inputs)
         # print("SCALED")
-        return self.nets(scaled_inputs)
+        return self.nets(resized)
 
     def __repr__(self):
         """Pretty print network."""

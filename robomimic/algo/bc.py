@@ -81,7 +81,7 @@ class BC(PolicyAlgo):
 
         Returns:
             input_batch (dict): processed and filtered batch that
-                will be used for training 
+                will be used for training
         """
         input_batch = dict()
         input_batch["obs"] = {k: batch["obs"][k][:, 0, :] for k in batch["obs"]}
@@ -265,7 +265,7 @@ class BC_Gaussian(BC):
             predictions (dict): dictionary containing network outputs
         """
         dists = self.nets["policy"].forward_train(
-            obs_dict=batch["obs"], 
+            obs_dict=batch["obs"],
             goal_dict=batch["goal_obs"],
         )
 
@@ -328,7 +328,7 @@ class BC_Gaussian(BC):
         """
         log = PolicyAlgo.log_info(self, info)
         log["Loss"] = info["losses"]["action_loss"].item()
-        log["Log_Likelihood"] = info["losses"]["log_probs"].item() 
+        log["Log_Likelihood"] = info["losses"]["log_probs"].item()
         if "policy_grad_norms" in info:
             log["Policy_Grad_Norms"] = info["policy_grad_norms"]
         return log
@@ -377,7 +377,7 @@ class BC_VAE(BC):
             encoder_kwargs=ObsUtils.obs_encoder_kwargs_from_config(self.obs_config.encoder),
             **VAENets.vae_args_from_config(self.algo_config.vae),
         )
-        
+
         self.nets = self.nets.float().to(self.device)
 
     def train_on_batch(self, batch, epoch, validate=False):
@@ -488,6 +488,7 @@ class BC_RNN(BC):
             **BaseNets.rnn_args_from_config(self.algo_config.rnn),
         )
 
+
         self._rnn_hidden_state = None
         self._rnn_horizon = self.algo_config.rnn.horizon
         self._rnn_counter = 0
@@ -581,7 +582,6 @@ class BC_RNN_GMM(BC_RNN):
         """
         assert self.algo_config.gmm.enabled
         assert self.algo_config.rnn.enabled
-
         self.nets = nn.ModuleDict()
         self.nets["policy"] = PolicyNets.RNNGMMActorNetwork(
             obs_shapes=self.obs_shapes,
@@ -616,7 +616,7 @@ class BC_RNN_GMM(BC_RNN):
             predictions (dict): dictionary containing network outputs
         """
         dists = self.nets["policy"].forward_train(
-            obs_dict=batch["obs"], 
+            obs_dict=batch["obs"],
             goal_dict=batch["goal_obs"],
         )
 
@@ -653,7 +653,7 @@ class BC_RNN_GMM(BC_RNN):
 
     def diagnose(self, batch):
         batch = TensorUtils.to_device(TensorUtils.to_float(batch), self.device)
-        
+
         dists = self.nets["policy"].forward_train(
             obs_dict=batch["obs"],
         )
@@ -677,7 +677,7 @@ class BC_RNN_GMM(BC_RNN):
         """
         log = PolicyAlgo.log_info(self, info)
         log["Loss"] = info["losses"]["action_loss"].item()
-        log["Log_Likelihood"] = info["losses"]["log_probs"].item() 
+        log["Log_Likelihood"] = info["losses"]["log_probs"].item()
         if "policy_grad_norms" in info:
             log["Policy_Grad_Norms"] = info["policy_grad_norms"]
         return log

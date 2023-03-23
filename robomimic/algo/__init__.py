@@ -8,4 +8,5 @@ from robomimic.algo.gl import GL, GL_VAE, ValuePlanner
 from robomimic.algo.hbc import HBC
 from robomimic.algo.iris import IRIS
 from robomimic.algo.td3_bc import TD3_BC
+from robomimic.algo.lmp import LMP
 from robomimic.algo.classifier import VanillaWeighter, ContrastiveWeighter, DistanceWeighter, TemporalEmbeddingWeighter, VAE_KNN

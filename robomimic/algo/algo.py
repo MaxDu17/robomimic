@@ -66,9 +66,7 @@ def algo_factory(algo_name, config, obs_key_shapes, ac_dim, device):
 
     # use algo factory func to get algo class and kwargs from algo config
     factory_func = algo_name_to_factory_func(algo_name)
-
     algo_cls, algo_kwargs = factory_func(config.algo)
-
     # create algo instance
     return algo_cls(
         algo_config=config.algo,
@@ -277,7 +275,7 @@ class Algo(object):
 
     def optim_deserialize(self, optim_dict):
         """
-        Load optimizers from a checkpoint (for parameters updated during training) 
+        Load optimizers from a checkpoint (for parameters updated during training)
         :param optim_dict:
         :return:
         """

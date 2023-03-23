@@ -171,12 +171,18 @@ def backprop_for_loss(net, optim, loss, max_grad_norm=None, retain_graph=False):
     # compute grad norms
     grad_norms = 0.
     for p in net.parameters():
+        #visual_encoder plan_proposal plan_recognition policy_network
+        # for p in net["plan_proposal"].parameters():
         # only clip gradients for parameters for which requires_grad is True
         if p.grad is not None:
             grad_norms += p.grad.data.norm(2).pow(2).item()
-
+            # if p.grad.data.norm(2).pow(2).item() == 0.0:
+            #     import ipdb
+            #     ipdb.set_trace()
     # step
+    # print(grad_norms)
     optim.step()
+
     # import ipdb
     # ipdb.set_trace()
 

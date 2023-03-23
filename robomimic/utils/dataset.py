@@ -187,7 +187,9 @@ class SequenceDataset(torch.utils.data.Dataset):
 
         if self.sample_limit is not None:
             assert self.sample_limit <= len(self.demos), "The lower bound of sample size must be at most the number of avaiable samples!"
+            random.shuffle(self.demos)
             self.demos = self.demos[0 : self.sample_limit] # chopping off the rest
+            print("###### SELECTED DEMOS ########", self.demos)
 
         # sort demo keys
         inds = np.argsort([int(elem[5:]) for elem in self.demos])
@@ -259,6 +261,7 @@ class SequenceDataset(torch.utils.data.Dataset):
                 success = self.get_dataset_for_ep(demo, "rewards")[-1] #for plotting purposes only
             else:
                 success = self.hdf5_file["data"][demo].attrs["target"]
+
             all_demo_data["actions"] = action_data
             all_demo_data = ObsUtils.process_obs_dict(all_demo_data)
 
@@ -702,6 +705,8 @@ class SequenceDataset(torch.utils.data.Dataset):
         #     viable_sample_size = self._demo_id_to_intervention_number[demo_id]
         # else:
         viable_sample_size = self._demo_id_to_demo_length[demo_id]
+        min_demo_length = min(self._demo_id_to_demo_length.values())
+
 
         # start at offset index if not padding for frame stacking
         demo_index_offset = 0 if self.pad_frame_stack else (self.n_frame_stack - 1)
@@ -758,20 +763,17 @@ class SequenceDataset(torch.utils.data.Dataset):
             if self.hdf5_normalize_obs:
                 meta["next_obs"] = ObsUtils.normalize_obs(meta["next_obs"], obs_normalization_stats=self.obs_normalization_stats)
 
-        if goal_index is not None:
 
-            ##### SUPER JANKY TEST FOR BASELINE ####
-            # current_demo_num = int(demo_id.split("_")[-1])
-            # if current_demo_num % 2 == 0:
-            #     demo_id = "demo_2"
-            #     goal_index = 93
-            #
-            # else:
-            #     demo_id = "demo_3" # good goals state
-            #     goal_index = 114
-            ########################################
-            # demo_id = "demo_3"
-            # goal_index = 114 # BASELINES THIS IS SUPER JANK
+        meta["plan_seq"] = self.get_obs_sequence_from_demo(
+            demo_id,
+            index_in_demo=np.random.randint(0, viable_sample_size - 40), #selects a random window
+            keys=self.obs_keys,
+            num_frames_to_stack=self.n_frame_stack - 1,
+            seq_length=40, #
+            prefix="obs"
+        )
+
+        if goal_index is not None:
             goal = self.get_obs_sequence_from_demo(
                 demo_id,
                 index_in_demo=goal_index,
