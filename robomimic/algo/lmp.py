@@ -69,9 +69,6 @@ class LMP(PolicyAlgo):
         )
 
         # needs to be larger 2048 latent (4 layers)
-        #TODO
-        # print("TODO: THIS IS NOT TRUE TO THE ORIGINAL INFRASTRUCTURE")
-        # MAKE A CUSTOM POLICY NET
         self.nets["policy"]["plan_recognition"] = PolicyNets.TrajEncoder_Network(
             obs_shapes=OrderedDict([('state_encoding', [128])]),
             ac_dim=256,
@@ -177,12 +174,15 @@ class LMP(PolicyAlgo):
         visual_encodings["state_encoding"] = self.nets["policy"]["visual_encoder"](obs_dict = batch["obs"])
         goal_visual_encodings["state_encoding"] = self.nets["policy"]["visual_encoder"](obs_dict = batch["goal_obs"])
 
+
+
+
+
         batch_size, seq_len = batch["plan_seq"]["agentview_image"].shape[0], batch["plan_seq"]["agentview_image"].shape[1]
         flattened_plan_seq = {k : torch.flatten(batch["plan_seq"][k], 0, 1) for k in batch["plan_seq"]}
         flattened_plan_encoding = self.nets["policy"]["visual_encoder"](obs_dict = flattened_plan_seq)
         unflatten_func = torch.nn.Unflatten(0, (batch_size, seq_len))
         plan_visual_encodings["state_encoding"] = unflatten_func(flattened_plan_encoding)
-
 
         plan_recog_dists = self.nets["policy"]["plan_recognition"].forward_train(obs_dict = plan_visual_encodings)
         plan_proposal_dists = self.nets["policy"]["plan_proposal"].forward_train(obs_dict = visual_encodings, goal_dict = goal_visual_encodings)
@@ -246,7 +246,7 @@ class LMP(PolicyAlgo):
         policy_grad_norms = TorchUtils.backprop_for_loss(
             net=self.nets["policy"],
             optim=self.optimizers["policy"],
-            loss=losses["action_loss"] + 0.0001 * losses["latent_loss"],
+            loss=losses["action_loss"] + 0.01 * losses["latent_loss"], #used to be 0.0001
         )
         info[f"policy_grad_norms"] = policy_grad_norms
         return info

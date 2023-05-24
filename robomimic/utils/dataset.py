@@ -187,7 +187,7 @@ class SequenceDataset(torch.utils.data.Dataset):
 
         if self.sample_limit is not None:
             assert self.sample_limit <= len(self.demos), "The lower bound of sample size must be at most the number of avaiable samples!"
-            random.shuffle(self.demos)
+            random.shuffle(self.demos) #TEMP DISABLE FOR DIAGNOSTIC ONLY
             self.demos = self.demos[0 : self.sample_limit] # chopping off the rest
             print("###### SELECTED DEMOS ########", self.demos)
 
@@ -239,7 +239,33 @@ class SequenceDataset(torch.utils.data.Dataset):
 
         self._weight_list = np.ones((self.total_num_sequences,))
 
+    def compute_own_bins(self, classifier):
+        assert self.hdf5_cache is not None, "Cachine is not yet implemented for weighted sampling"
+        assert not self.priority, "Priority sampling is not yet implemented for weighted sampling"
+
+        print("computing time_to_success")
+        self.to_successes_list = list()
+
+        counter = 0
+        for demo in LogUtils.custom_tqdm(self.demos):
+            counter += 1 #for plotting purposes
+            # if counter % 3 != 0:
+            #     continue
+            all_demo_data = {key: self.get_dataset_for_ep(demo, f"obs/{key}")[:] for key in self.obs_keys}
+            action_data = self.get_dataset_for_ep(demo, "actions") #for use in the embeddings
+
+            if "target" not in self.hdf5_file["data"][demo].attrs: # attrs["target"]
+                success = self.get_dataset_for_ep(demo, "rewards")[-1] #for plotting purposes only
+            else:
+                success = self.hdf5_file["data"][demo].attrs["target"]
+
+            all_demo_data["actions"] = action_data
+            all_demo_data = ObsUtils.process_obs_dict(all_demo_data)
+            to_successes = classifier.time_to_success(all_demo_data)
+            to_successes_list.append(to_successes)
+
     def compute_own_embeddings(self, classifier):
+        raise Exception("This doesn't apply anymore!")
         assert self.weighting, "You must enable weighting to weigh the dataset!"
         assert self.hdf5_cache is not None, "Cachine is not yet implemented for weighted sampling"
         assert not self.priority, "Priority sampling is not yet implemented for weighted sampling"
@@ -707,7 +733,6 @@ class SequenceDataset(torch.utils.data.Dataset):
         viable_sample_size = self._demo_id_to_demo_length[demo_id]
         min_demo_length = min(self._demo_id_to_demo_length.values())
 
-
         # start at offset index if not padding for frame stacking
         demo_index_offset = 0 if self.pad_frame_stack else (self.n_frame_stack - 1)
         index_in_demo = index - demo_start_index + demo_index_offset
@@ -763,15 +788,25 @@ class SequenceDataset(torch.utils.data.Dataset):
             if self.hdf5_normalize_obs:
                 meta["next_obs"] = ObsUtils.normalize_obs(meta["next_obs"], obs_normalization_stats=self.obs_normalization_stats)
 
+        meta["time_to_success"] = end_index_in_demo - index_in_demo
 
-        meta["plan_seq"] = self.get_obs_sequence_from_demo(
-            demo_id,
-            index_in_demo=np.random.randint(0, viable_sample_size - 40), #selects a random window
-            keys=self.obs_keys,
-            num_frames_to_stack=self.n_frame_stack - 1,
-            seq_length=40, #
-            prefix="obs"
-        )
+        # if min_demo_length < 40:
+        #     SAMPLE_LENGTH = 20
+        # elif min_demo_length < 160:
+        #     SAMPLE_LENGTH = 40
+        # else:
+        #     SAMPLE_LENGTH = 80
+        # # print(min_demo_length, "Sample length: ", SAMPLE_LENGTH)
+
+        # meta["plan_seq"] = self.get_obs_sequence_from_demo(
+        #     demo_id,
+        #     # index_in_demo=np.random.randint(0, viable_sample_size - SAMPLE_LENGTH), #selects a random window
+        #     index_in_demo=min(viable_sample_size - SAMPLE_LENGTH - 1, index_in_demo), #selects a window projected from current frame
+        #     keys=self.obs_keys,
+        #     num_frames_to_stack=self.n_frame_stack - 1,
+        #     seq_length=SAMPLE_LENGTH,
+        #     prefix="obs"
+        # )
 
         if goal_index is not None:
             goal = self.get_obs_sequence_from_demo(
@@ -931,8 +966,8 @@ class SequenceDataset(torch.utils.data.Dataset):
         `DataLoader` documentation, for more info.
         """
         # return torch.utils.data.sampler.WeightedRandomSampler(list(self._weight_list.values()), self.total_num_sequences, replacement = True)  # if we are weighting
-        return torch.utils.data.sampler.WeightedRandomSampler(self._weight_list.tolist(), self.total_num_sequences, replacement = True)  # if we are weighting
-        # return None
+        # return torch.utils.data.sampler.WeightedRandomSampler(self._weight_list.tolist(), self.total_num_sequences, replacement = True)  # if we are weighting
+        return None
 
     def get_weight_list(self):
         return self._weight_list

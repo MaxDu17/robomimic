@@ -336,7 +336,6 @@ def policy_from_checkpoint(device=None, ckpt_path=None, ckpt_dict=None, verbose=
             re-loading checkpoint from disk multiple times)
     """
     ckpt_dict = maybe_dict_from_checkpoint(ckpt_path=ckpt_path, ckpt_dict=ckpt_dict)
-
     # algo name and config from model dict
     algo_name, _ = algo_name_from_checkpoint(ckpt_dict=ckpt_dict)
     config, _ = config_from_checkpoint(algo_name=algo_name, ckpt_dict=ckpt_dict, verbose=verbose)

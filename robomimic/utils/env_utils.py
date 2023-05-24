@@ -183,7 +183,6 @@ def create_env_from_metadata(
         env_name = env_meta["env_name"]
     env_type = get_env_type(env_meta=env_meta)
     env_kwargs = env_meta["env_kwargs"]
-
     env = create_env(
         env_type=env_type,
         env_name=env_name,

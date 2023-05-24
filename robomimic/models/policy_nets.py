@@ -877,7 +877,6 @@ class RNNGMMActorNetwork(RNNActorNetwork):
         # to (batch_size, timesteps, num_modes) since MixtureSameFamily expects this shape
         component_distribution = D.Normal(loc=means, scale=scales)
         component_distribution = D.Independent(component_distribution, 1) # shift action dim to event shape
-
         # unnormalized logits to categorical distribution for mixing the modes
         mixture_distribution = D.Categorical(logits=logits)
 
@@ -1314,7 +1313,7 @@ class TrajEncoder_Network(RNN_MIMO_MLP):
         output_shapes = self._get_output_shapes()
         super(TrajEncoder_Network, self).__init__(
             input_obs_group_shapes=observation_group_shapes,
-            output_shapes=output_shapes,
+            output_shapes=OrderedDict([('hidden_states', [2048])]),
             mlp_layer_dims=mlp_layer_dims,
             mlp_activation=nn.ReLU,
             mlp_layer_func=nn.Linear,
@@ -1325,6 +1324,23 @@ class TrajEncoder_Network(RNN_MIMO_MLP):
             per_step=True,
             encoder_kwargs=encoder_kwargs,
         )
+
+        self.mean_proj = torch.nn.Linear(2 * 2048, ac_dim)
+        self.stdev_proj = torch.nn.Linear(2 * 2048, ac_dim)
+
+        # super(TrajEncoder_Network, self).__init__(
+        #     input_obs_group_shapes=observation_group_shapes,
+        #     output_shapes=output_shapes,
+        #     mlp_layer_dims=mlp_layer_dims,
+        #     mlp_activation=nn.ReLU,
+        #     mlp_layer_func=nn.Linear,
+        #     rnn_hidden_dim=rnn_hidden_dim,
+        #     rnn_num_layers=rnn_num_layers,
+        #     rnn_type=rnn_type,
+        #     rnn_kwargs=rnn_kwargs,
+        #     per_step=True,
+        #     encoder_kwargs=encoder_kwargs,
+        # )
 
     def _get_output_shapes(self):
         """
@@ -1364,14 +1380,16 @@ class TrajEncoder_Network(RNN_MIMO_MLP):
             mod = list(obs_dict.keys())[0]
             goal_dict = TensorUtils.unsqueeze_expand_at(goal_dict, size=obs_dict[mod].shape[1], dim=1)
 
-        out = super(TrajEncoder_Network, self).forward(
-            obs=obs_dict, goal=goal_dict, rnn_init_state=rnn_init_state, return_state=return_state)
+        out = super(TrajEncoder_Network, self).forward(obs=obs_dict, goal=goal_dict, rnn_init_state=rnn_init_state, return_state=return_state)
+        concat_out = torch.cat((out["hidden_states"][:, 0], out["hidden_states"][:, -1]), dim = 1)
+        mean = self.mean_proj(concat_out)
+        scale = self.stdev_proj(concat_out) if not self.fixed_std else torch.ones_like(mean) * self.init_std
 
-        # THIS IS SUPER JANK; WE ARE ONLY USING THE LAST ACTIVATION
-        mean = out["mean"][:, -1]
-        # Use either constant std or learned std depending on setting
-        scale = out["scale"][:, -1] if not self.fixed_std else torch.ones_like(mean) * self.init_std
-      
+        # # THIS IS SUPER JANK; WE ARE ONLY USING THE LAST ACTIVATION
+        # mean = out["mean"][:, -1]
+        # # Use either constant std or learned std depending on setting
+        # scale = out["scale"][:, -1] if not self.fixed_std else torch.ones_like(mean) * self.init_std
+
         # Clamp the mean
         mean = torch.clamp(mean, min=self.mean_limits[0], max=self.mean_limits[1])
 

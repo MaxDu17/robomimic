@@ -11,3 +11,4 @@ from robomimic.config.iris_config import IRISConfig
 from robomimic.config.td3_bc_config import TD3_BCConfig
 from robomimic.config.lmp_config import LMPConfig
 from robomimic.config.classifier_config import WeightConfig, WeightContrastiveConfig, DistanceConfig, TemporalEmbeddingConfig
+from robomimic.config.time_to_success_config import ClassificationConfig

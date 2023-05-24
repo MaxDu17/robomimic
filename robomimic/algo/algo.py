@@ -333,6 +333,14 @@ class WeighingAlgo(Algo):
     def similarity_score(self, state_one, state_two):
         raise NotImplementedError
 
+class TimeToSuccessAlgo(Algo):
+    """
+    Base class for reweighing classifier algorithms
+    """
+    def time_to_success(self, state):
+        raise NotImplementedError
+
+
 class ValueAlgo(Algo):
     """
     Base class for all algorithms that can learn a value function.

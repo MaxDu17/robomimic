@@ -11,7 +11,7 @@ from robomimic.models.obs_nets import MIMO_MLP
 from robomimic.models.distributions import DiscreteValueDistribution
 
 
-class WeighterNet(MIMO_MLP):
+class ClassifierNet(MIMO_MLP):
     """
     A basic value network that predicts values from observations.
     Can optionally be goal conditioned on future observations.
@@ -21,7 +21,7 @@ class WeighterNet(MIMO_MLP):
         obs_shapes,
         mlp_layer_dims,
         encoder_kwargs=None,
-        weight_bounds = None,
+        n_bins = 5,
         head_activation = "sigmoid"
     ):
         """
@@ -55,18 +55,17 @@ class WeighterNet(MIMO_MLP):
                 obs_modality2: dict
                     ...
         """
-        import ipdb
-        ipdb.set_trace()
         assert isinstance(obs_shapes, OrderedDict)
         self.obs_shapes = obs_shapes
         self.head_activation = head_activation
+        self.nbins = n_bins
 
         # set up different observation groups for @MIMO_MLP
         observation_group_shapes = OrderedDict()
         observation_group_shapes["obs"] = OrderedDict(self.obs_shapes)
 
         output_shapes = self._get_output_shapes()
-        super(WeighterNet, self).__init__(
+        super(ClassifierNet, self).__init__(
             input_obs_group_shapes=observation_group_shapes,
             output_shapes=output_shapes,
             layer_dims=mlp_layer_dims,
@@ -79,7 +78,7 @@ class WeighterNet(MIMO_MLP):
         always directly predict values, but may instead predict the parameters
         of a value distribution.
         """
-        return OrderedDict(value=(1,))
+        return OrderedDict(value=(self.nbins,))
 
     def output_shape(self, input_shape=None):
         """
@@ -93,37 +92,15 @@ class WeighterNet(MIMO_MLP):
         Returns:
             out_shape ([int]): list of integers corresponding to output shape
         """
-        return [1]
+        return [self.nbins]
 
-    def forward(self, obs_dict_1, obs_dict_2):
+    def forward(self, obs_dict):
         """
         Forward through value network, and then optionally use tanh scaling.
         """
 
         obs_dict_combined = OrderedDict()
-        batch_size = obs_dict_1[list(obs_dict_1.keys())[0]].shape[0] # a nasty hack, but it is guarenteeed to work
-        random_mask = np.zeros(batch_size, dtype=bool)
-        random_mask[0:batch_size // 2] = 1
-        np.random.shuffle(random_mask)
-        bin_1 = np.where(random_mask)
-        bin_2 = np.where(~random_mask)
-
-        for key_1, key_2 in zip(obs_dict_1.keys(), obs_dict_2.keys()):
-            assert key_1 == key_2, "The keys you're trying to fuse are not the same!"
-            # permuted_1 = torch.zeros_like(obs_dict_1[key_1])
-            # permuted_2 = torch.zeros_like(obs_dict_2[key_2])
-            #
-            # permuted_1[bin_1] = obs_dict_1[key_1][bin_1]
-            # permuted_2[bin_2] = obs_dict_1[key_1][bin_2]
-            #
-            # permuted_2[bin_1] = obs_dict_2[key_2][bin_1]
-            # permuted_1[bin_2] = obs_dict_2[key_2][bin_2]
-
-
-            obs_dict_combined[key_1] = torch.cat((obs_dict_1[key_1], obs_dict_2[key_2]), dim = 1)
-            # obs_dict_combined[key_1] = torch.cat((permuted_1, permuted_2), dim = 1)
-
-        weights = super(WeighterNet, self).forward(obs=obs_dict_combined)["value"]
+        weights = super(ClassifierNet, self).forward(obs=obs_dict)["value"]
         if self.head_activation == "sigmoid":
             weights = torch.sigmoid(weights)
         elif self.head_activation == "relu":
